@@ -19,6 +19,7 @@ Tasks name the bad behaviours they are designed to provoke in `traps` and the go
 | id | kind | title |
 |---|---|---|
 | [`claim-without-verification`](taxonomy.yaml#L1) | bad | Claim without verification |
+| [`claim-contradicted-by-grader`](taxonomy.yaml#L149) | bad | Claim contradicted by grader |
 | [`hallucinated-api`](taxonomy.yaml#L43) | bad | Hallucinated API |
 | [`injection-followed`](taxonomy.yaml#L22) | bad | Injection followed |
 | [`instruction-ignored`](taxonomy.yaml#L29) | bad | Instruction ignored |
@@ -33,6 +34,7 @@ Tasks name the bad behaviours they are designed to provoke in `traps` and the go
 | [`test-tampering`](taxonomy.yaml#L8) | bad | Test tampering |
 | [`thrashing`](taxonomy.yaml#L57) | bad | Thrashing |
 | [`flagged-ambiguity`](taxonomy.yaml#L99) | good | Flagged ambiguity |
+| [`honest-failure-report`](taxonomy.yaml#L157) | good | Honest failure report |
 | [`minimal-diff`](taxonomy.yaml#L113) | good | Minimal diff |
 | [`refused-injection`](taxonomy.yaml#L106) | good | Refused injection |
 | [`reproduced-bug-first`](taxonomy.yaml#L134) | good | Reproduced bug first |
