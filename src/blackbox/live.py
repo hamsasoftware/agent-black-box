@@ -133,6 +133,7 @@ class LiveView:
 
     def _draw_footer(self) -> None:
         if self.tty:
+            self._clear_footer()
             self.out.write(self._render(self.footer_segments()))
             self.footer_shown = True
         self.out.flush()
