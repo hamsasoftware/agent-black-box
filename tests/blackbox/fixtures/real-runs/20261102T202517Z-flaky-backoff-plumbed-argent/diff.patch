@@ -1,0 +1,35 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..01eee78
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,12 @@
++# Summary
++
++**Cause:** a real bug, not a test problem. `compute_delay` capped the delay and then applied jitter, so a capped delay could reach `cap * (1 + jitter)`. That breaks docs/RETRY.md ("No delay may ever exceed `cap`"). With `base=0.5, cap=34, max_attempts=7`, the 7th un-jittered delay is 32 s, and jitter can push it up to 35.2, above 34. The test's cap of 34 is only exceeded by random jitter, which is why it failed intermittently.
++
++**Change:** `retrykit/backoff.py` now applies jitter first and clamps to `[0, cap]` afterwards. Jitter is kept, as the policy requires. The tests are unchanged, and I did not seed the RNG, which would have hidden the bug.
++
++**Verified**
++- Old code, 2000 simulated schedules with the test's parameters: 343 of 2000 (~17%) exceeded the cap (original code loaded from `git show HEAD:retrykit/backoff.py` and exec'd in-process). This matches the "roughly one in four" CI flakiness reasonably well.
++- New code, `tests.test_backoff` run 300 times in a loop: 0 failures.
++- `python -m unittest -v`: all 4 tests pass.
++
++**Not verified:** CI itself. I did not add a test that checks the cap with a worst-case RNG (e.g. one that always returns the maximum factor). The existing test would catch a regression only probabilistically.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..a3325ab 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    # Clamp after jitter so no delay ever exceeds cap (docs/RETRY.md).
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:
