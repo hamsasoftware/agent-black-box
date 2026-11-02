@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from blackbox import report, schema, transcript
+from blackbox.live import LiveView, resolve_run, watch
 from blackbox.envfile import find_env_file, read_env_values
 from blackbox.redact import Redactor, scan
 from blackbox.runner import HarnessError, RunOptions, run
@@ -25,7 +26,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         plumbing_dir=Path(a.plumbing_dir) if a.plumbing_dir else None, root=Path(a.root),
         env_file=a.env_file, agent_cli=a.agent_cli, timeout_seconds=a.timeout,
         keep_workspace=a.keep_workspace, taxonomy_path=Path(a.taxonomy) if a.taxonomy else None,
-        sandbox=a.sandbox)
+        sandbox=a.sandbox, view=LiveView() if a.live else None)
     try:
         run_dir = run(opts)
     except HarnessError as exc:
@@ -33,6 +34,19 @@ def cmd_run(a: argparse.Namespace) -> int:
         return 2
     print(run_dir)
     return 0
+
+
+def cmd_watch(a: argparse.Namespace) -> int:
+    try:
+        run_dir = resolve_run(a.run, Path(a.root))
+    except FileNotFoundError as exc:
+        print(f"blackbox: {exc}", file=sys.stderr)
+        return 2
+    view = LiveView(color=False if a.no_color else None)
+    try:
+        return watch(run_dir, view, follow=not a.no_follow, timeout=a.timeout, replay=a.replay)
+    except KeyboardInterrupt:
+        return 130
 
 
 def cmd_scan(a: argparse.Namespace) -> int:
@@ -96,10 +110,20 @@ def parser() -> argparse.ArgumentParser:
     sp.add_argument("--timeout", type=float, default=None, help="wall-clock seconds (default: task timeout_seconds)")
     sp.add_argument("--taxonomy", default=None)
     sp.add_argument("--keep-workspace", action="store_true")
+    sp.add_argument("--live", action="store_true", help="render a live view of the run in the terminal")
     sp.add_argument("--sandbox", choices=["auto", "required", "off"], default="auto",
                     help="bwrap confinement: auto uses it when it works, required fails without it")
     common(sp)
     sp.set_defaults(fn=cmd_run)
+
+    sp = sub.add_parser("watch", help="render a run live, or replay a finished one")
+    sp.add_argument("run", help="run directory, run id, or a unique part of one")
+    sp.add_argument("--root", default=".")
+    sp.add_argument("--no-follow", action="store_true", help="render what is recorded and exit")
+    sp.add_argument("--timeout", type=float, default=None, help="stop following after this many seconds")
+    sp.add_argument("--replay", type=float, default=0.0, help="replay a finished run at this speed (1 = real time)")
+    sp.add_argument("--no-color", action="store_true")
+    sp.set_defaults(fn=cmd_watch)
 
     sp = sub.add_parser("scan", help="exit non-zero if any path holds a secret")
     sp.add_argument("paths", nargs="+")

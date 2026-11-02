@@ -6,6 +6,8 @@ The harness: runs one task headlessly with the agent CLI, records a redacted led
 
 ```
 python -m blackbox run TASK_DIR|--task ID --variant bare|plumbed --model ID [--budget-usd N] [--plumbing-dir DIR] [--sandbox auto|required|off]
+python -m blackbox run ... --live                # same, with a live terminal view
+python -m blackbox watch RUN [--no-follow] [--replay N]   # follow or replay a run
 python -m blackbox scan PATH...                 # exit 1 on a secret
 python -m blackbox ingest-transcript FILE --name NAME --role ROLE
 python -m blackbox index                        # runs/index.jsonl
@@ -33,8 +35,9 @@ The `blackbox` console script is the same entry point.
 | `ledger.py` | Roster names, agent ids, JSON and JSONL writers (always through the redactor). |
 | `transcript.py` | Builder transcript ingestion into `ledger/builders/`. |
 | `report.py` | `runs/index.jsonl` and `docs/results.md`. |
+| `live.py` | Terminal live view (ANSI only) for `run --live` and `watch`. |
 | `schema.py` | Small JSON Schema validator for the ledger schema. |
 
 ## How a run flows
 
-`run` loads `task.yaml` and the env file, takes the next roster name, copies `fixture/` (and the plumbing for `plumbed`) into a temp workspace, commits a baseline, prepares confinement (sandbox, private home, deny rules, guard hook), launches the agent CLI with stdout captured line by line, stops it on exit or timeout, diffs the workspace against the baseline, copies and runs the hidden grader, runs the detectors and claim checks, then redacts and writes `runs/<run_id>/events.jsonl`, `diff.patch`, `grade.json` and `run.json`, and appends the subject to `ledger/agents.jsonl`.
+`run` loads `task.yaml` and the env file, takes the next roster name, copies `fixture/` (and the plumbing for `plumbed`) into a temp workspace, commits a baseline, prepares confinement (sandbox, private home, deny rules, guard hook), creates `runs/<run_id>/` with `live.json`, launches the agent CLI and appends each redacted event to `events.jsonl` as it arrives (and to the live view with `--live`), stops it on exit or timeout, diffs the workspace against the baseline, copies and runs the hidden grader, runs the detectors and claim checks, then redacts and writes `diff.patch`, `grade.json` and `run.json`, removes `live.json`, and appends the subject to `ledger/agents.jsonl`.
