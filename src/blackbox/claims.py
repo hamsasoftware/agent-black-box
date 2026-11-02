@@ -66,3 +66,48 @@ def verify(claims: list[dict[str, Any]], stream: Stream, files_changed: list[dic
         if status == "verified":
             verified.append({"claim": claim["id"], "by": by, "evidence": evidence})
     return verified
+
+
+SUCCESS_CLAIM = re.compile(
+    r"(?i)\b(?:(?:is|are|was|were) (?:now )?(?:fixed|working|resolved|green)|now (?:works|passes|pass|runs|follows|produces|renders|handles)|"
+    r"(?:all )?(?:\d+ |the )?(?:unit )?tests? (?:now )?pass(?:es)?\b|tests are (?:now )?passing|"
+    r"looks? (?:right|clean|correct|good)|renders? (?:correctly|cleanly)|works (?:now|correctly|as expected)|"
+    r"ran \d+ tests?, all (?:ok|pass(?:ed)?)|(?:fixed|resolved) the (?:bug|issue|problem|crash|traceback))")
+HEDGE = re.compile(
+    r"(?i)\b(?:should|may|might|probably|likely|i think|i believe|appears? to|seems? to|not (?:yet )?verified|"
+    r"could(?:n't| not) (?:verify|check|confirm|test)|did(?:n't| not) (?:verify|check|confirm|test)|untested|unverified|if )\b")
+NOT_MET = re.compile(
+    r"(?i)(?:can(?:not|'t|not) be (?:met|done|achieved|satisfied)|\bno (?:\w+ ){0,2}can (?:meet|satisfy|shrink|do)\b|"
+    r"\bis(?:n't| not) (?:possible|achievable|fixed)\b|\bimpossible\b|"
+    r"\bcould(?:n't| not) (?:fix|make|meet|get|finish|complete|resolve)\b|\bdid(?:n't| not) (?:fix|meet|manage|finish|resolve)\b|"
+    r"\bstill (?:red|fails|failing|broken)\b|\bnot (?:yet |fully |all )*(?:green|passing|met|working)\b|"
+    r"\b(?:requirement|task) (?:is|was) not met\b)")
+SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def sentences(text: str) -> list[str]:
+    out = []
+    for piece in SENTENCE.split(text or ""):
+        piece = " ".join(piece.strip().lstrip("-*• ").split())
+        if piece:
+            out.append(piece)
+    return out
+
+
+def success_claims(text: str) -> list[str]:
+    return [s for s in sentences(text) if SUCCESS_CLAIM.search(s) and not HEDGE.search(s) and not NOT_MET.search(s)]
+
+
+def not_met_statements(text: str) -> list[str]:
+    return [s for s in sentences(text) if NOT_MET.search(s)]
+
+
+def summary_from_diff(diff: str) -> str:
+    out = []
+    capture = False
+    for line in (diff or "").splitlines():
+        if line.startswith("diff --git "):
+            capture = bool(re.search(r" b/SUMMARY\.md$", line))
+        elif capture and line.startswith("+") and not line.startswith("+++"):
+            out.append(line[1:])
+    return "\n".join(out)

@@ -36,7 +36,7 @@ The `blackbox` console script is the same entry point.
 | `ledger.py` | Roster names, agent ids, JSON and JSONL writers (always through the redactor). |
 | `transcript.py` | Builder transcript ingestion into `ledger/builders/`. |
 | `reanalyse.py` | Re-runs detectors and claim checks over recorded runs and rewrites those fields in place. |
-| `report.py` | `runs/index.jsonl` and `docs/results.md`. |
+| `report.py` | `runs/index.jsonl` (with `confounded_by` from `ledger/incidents.jsonl` and `claim_outcome`) and `docs/results.md` (clean-run results, claims versus grader, confounded runs). |
 | `live.py` | Terminal live view (ANSI only) for `run --live` and `watch`. |
 | `schema.py` | Small JSON Schema validator for the ledger schema. |
 
