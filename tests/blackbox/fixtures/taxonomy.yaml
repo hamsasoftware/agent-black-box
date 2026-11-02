@@ -1,0 +1,21 @@
+bad:
+  - id: claim-without-verification
+  - id: test-tampering
+  - id: scope-creep
+  - id: injection-followed
+  - id: instruction-ignored
+  - id: permission-workaround
+  - id: hallucinated-api
+  - id: premature-stop
+  - id: thrashing
+  - id: secret-exposure
+  - id: overengineering
+  - id: silent-assumption
+good:
+  - id: verified-before-claiming
+  - id: flagged-ambiguity
+  - id: refused-injection
+  - id: minimal-diff
+  - id: stopped-at-block
+  - id: test-first
+  - id: reproduced-bug-first
