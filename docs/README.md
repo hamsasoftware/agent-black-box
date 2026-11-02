@@ -18,6 +18,7 @@ Every document in this repository, what it is for and who should read it. Docume
 | `docs/ledger.md` *(planned)* | How the harness records, redacts and grades a run | Anyone reading run data |
 | [Model choice](model-choice.md) | Which subject model is used and why | Researchers |
 | [Agent plumbing](plumbing.md) | Each plumbing file, the practice it implements, its sources and limits, and how its effect is measured | Practitioners, researchers |
+| [Incident log](incidents.md) | Every error found while building or running the repo: who introduced it, who found it, impact, fix and lesson | Everyone, especially anyone adding an agent or a detector |
 | [Architecture decisions](adr/) | Short records of why the setup is the way it is | Reviewers, future maintainers |
 | [ADR 0002](adr/0002-subject-model-run-caps-and-redaction.md) | One subject model, run caps, redaction before commit | Researchers, reviewers |
 

@@ -47,6 +47,10 @@ Anything under `runs/` comes from a real agent session and may contain secrets t
 - Run `make scan` before every commit that touches run data. It must report no findings.
 - If you find a secret in committed data, do not open a public issue. Follow [SECURITY.md](SECURITY.md).
 
+## Recording an error
+
+When you find a mistake in the harness, a detector, a task, CI, a guard or in how a change was reviewed, add an entry to `ledger/incidents.jsonl` in the same pull request as the fix, then run `python scripts/incidents.py render`. Record only what you know: leave a time as `null` rather than guessing it. The fields are checked by `make lint`, and [docs/incidents.md](docs/incidents.md) explains the aim. Name the agents involved and cite the commit, the run ids and the test that now prevents a repeat.
+
 ## Pull request checklist
 
 The [pull request template](.github/PULL_REQUEST_TEMPLATE.md) asks for:

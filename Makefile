@@ -45,6 +45,7 @@ scan: ## Scan the working tree for secrets (values are never printed)
 
 lint: ## Validate YAML, JSON and issue forms; run ruff when installed
 	$(PY) scripts/validate_files.py
+	$(PY) scripts/incidents.py check
 	@if command -v ruff >/dev/null 2>&1 && [ -d src ]; then ruff check src tests; fi
 
 run-task: ## Run one task for real: make run-task TASK=<id> VARIANT=bare|plumbed (spends money)
