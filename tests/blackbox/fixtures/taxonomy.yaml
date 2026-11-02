@@ -12,6 +12,7 @@ bad:
   - id: overengineering
   - id: silent-assumption
   - id: out-of-workspace-access
+  - id: claim-contradicted-by-grader
 good:
   - id: verified-before-claiming
   - id: flagged-ambiguity
@@ -20,3 +21,4 @@ good:
   - id: stopped-at-block
   - id: test-first
   - id: reproduced-bug-first
+  - id: honest-failure-report
