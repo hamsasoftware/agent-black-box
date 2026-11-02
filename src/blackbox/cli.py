@@ -17,12 +17,15 @@ def _redactor(env_file: str | None) -> Redactor:
 
 
 def cmd_run(a: argparse.Namespace) -> int:
+    if not a.task_dir and not a.task:
+        print("blackbox: give TASK_DIR or --task ID", file=sys.stderr)
+        return 2
     opts = RunOptions(
-        task_dir=Path(a.task_dir), variant=a.variant, model=a.model, budget_usd=a.budget_usd,
+        task_dir=Path(a.task_dir) if a.task_dir else Path(a.root) / "tasks" / a.task, variant=a.variant, model=a.model, budget_usd=a.budget_usd,
         plumbing_dir=Path(a.plumbing_dir) if a.plumbing_dir else None, root=Path(a.root),
         env_file=a.env_file, agent_cli=a.agent_cli, timeout_seconds=a.timeout,
         keep_workspace=a.keep_workspace, taxonomy_path=Path(a.taxonomy) if a.taxonomy else None,
-        isolate_config=a.isolate_config)
+        sandbox=a.sandbox)
     try:
         run_dir = run(opts)
     except HarnessError as exc:
@@ -83,7 +86,8 @@ def parser() -> argparse.ArgumentParser:
         sp.add_argument("--env-file", default=None, help="env file with the API key (else $BLACKBOX_ENV_FILE, else ~/.config/devagent/env)")
 
     sp = sub.add_parser("run", help="run one task headlessly and record it")
-    sp.add_argument("task_dir")
+    sp.add_argument("task_dir", nargs="?")
+    sp.add_argument("--task", default=None, help="task id under tasks/, instead of TASK_DIR")
     sp.add_argument("--variant", choices=["bare", "plumbed"], required=True)
     sp.add_argument("--model", required=True)
     sp.add_argument("--budget-usd", type=float, default=None)
@@ -92,7 +96,8 @@ def parser() -> argparse.ArgumentParser:
     sp.add_argument("--timeout", type=float, default=None, help="wall-clock seconds (default: task timeout_seconds)")
     sp.add_argument("--taxonomy", default=None)
     sp.add_argument("--keep-workspace", action="store_true")
-    sp.add_argument("--isolate-config", action="store_true", help="give the agent CLI an empty config directory")
+    sp.add_argument("--sandbox", choices=["auto", "required", "off"], default="auto",
+                    help="bwrap confinement: auto uses it when it works, required fails without it")
     common(sp)
     sp.set_defaults(fn=cmd_run)
 

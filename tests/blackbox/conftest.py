@@ -36,17 +36,29 @@ def task_dir(tmp_path):
 
 @pytest.fixture
 def do_run(root, task_dir, env_file, tmp_path, monkeypatch):
-    def go(scenario, variant="bare", **kw):
-        argv_out = tmp_path / f"argv-{scenario}-{variant}.json"
-        monkeypatch.setenv("FAKE_AGENT_SCENARIO", scenario)
-        monkeypatch.setenv("FAKE_AGENT_ARGV_OUT", str(argv_out))
+    def go(scenario, variant="bare", sandbox="off", extra_env=None, **kw):
+        monkeypatch.setenv("BLACKBOX_CANARY", "leaky")
+        env = {"FAKE_AGENT_SCENARIO": scenario, "FAKE_OUTSIDE_PATH": str(task_dir / "PROMPT.md"), **(extra_env or {})}
         opts = RunOptions(task_dir=task_dir, variant=variant, model="claude-sonnet-5-5", budget_usd=0.75,
-                          root=root, env_file=str(env_file), agent_cli=str(FIXTURES / "fake_agent.py"), **kw)
+                          root=root, env_file=str(env_file), agent_cli=str(FIXTURES / "fake_agent.py"),
+                          sandbox=sandbox, extra_env=env, **kw)
         run_dir = run(opts)
         record = json.loads((run_dir / "run.json").read_text())
-        argv = json.loads(argv_out.read_text()) if argv_out.exists() else None
-        return run_dir, record, argv
+        events = [json.loads(l)["event"] for l in (run_dir / "events.jsonl").read_text().splitlines()]
+        probe = next((e for e in events if e.get("type") == "fake_probe"), None)
+        return run_dir, record, probe
     return go
+
+
+def sandbox_works():
+    from blackbox import sandbox
+    return sandbox.probe()[0]
+
+
+@pytest.fixture
+def needs_sandbox():
+    if not sandbox_works():
+        pytest.skip("bwrap sandbox unavailable here")
 
 
 def all_text(path: Path) -> str:

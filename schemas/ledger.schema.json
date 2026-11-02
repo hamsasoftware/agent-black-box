@@ -421,6 +421,27 @@
         "event_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "hook_blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hook_block"
+          }
+        },
+        "permission_mode": {
+          "type": "string"
+        },
+        "setting_sources": {
+          "type": "string"
+        },
+        "plumbing_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confinement": {
+          "$ref": "#/$defs/confinement"
         }
       }
     },
@@ -586,6 +607,82 @@
         "malformed_lines": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "hook_block": {
+      "type": "object",
+      "required": [
+        "tool_name",
+        "tool_use_id",
+        "event",
+        "reason"
+      ],
+      "properties": {
+        "tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "tool_input": {
+          "type": "object"
+        },
+        "event": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "confinement": {
+      "type": "object",
+      "required": [
+        "layers",
+        "sandbox",
+        "guard_hook",
+        "isolated_config"
+      ],
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "bwrap-sandbox",
+              "isolated-config",
+              "permission-deny-rules",
+              "workspace-guard-hook"
+            ]
+          }
+        },
+        "sandbox": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sandbox_detail": {
+          "type": "string"
+        },
+        "deny_rules": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "guard_hook": {
+          "type": "boolean"
+        },
+        "isolated_config": {
+          "type": "boolean"
+        },
+        "python_prefix_visible": {
+          "type": "boolean"
         }
       }
     }

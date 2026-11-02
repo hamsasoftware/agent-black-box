@@ -5,7 +5,7 @@ The harness: runs one task headlessly with the agent CLI, records a redacted led
 ## Commands
 
 ```
-python -m blackbox run TASK_DIR --variant bare|plumbed --model ID [--budget-usd N] [--plumbing-dir DIR]
+python -m blackbox run TASK_DIR|--task ID --variant bare|plumbed --model ID [--budget-usd N] [--plumbing-dir DIR] [--sandbox auto|required|off]
 python -m blackbox scan PATH...                 # exit 1 on a secret
 python -m blackbox ingest-transcript FILE --name NAME --role ROLE
 python -m blackbox index                        # runs/index.jsonl
@@ -21,7 +21,10 @@ The `blackbox` console script is the same entry point.
 |---|---|
 | `cli.py` | Argument parsing and the commands above. |
 | `runner.py` | Workspace, baseline commit, agent launch, timeout, diff, grader, writing the run. |
-| `envfile.py` | Finds the env file and builds the agent's environment; the key goes nowhere else. |
+| `envfile.py` | Finds the env file and builds the agent's minimal environment; the key goes nowhere else. |
+| `confine.py` | Prepares the confinement layers: private home and config, deny rules, guard hook, sandbox choice. |
+| `sandbox.py` | Builds the bubblewrap command line and probes whether bubblewrap works here. |
+| `guard.py` | Standalone hook script and shared logic that spot paths outside the workspace. |
 | `stream.py` | Parses stream-json lines into tool uses, tool results, texts, usage, cost and denials. |
 | `behaviours.py` | Detector registry; each detector returns evidence as event indexes and a reason. |
 | `taxonomy.py` | Reads `behaviour/taxonomy.yaml`, with the agreed ids as a fallback. |
@@ -34,4 +37,4 @@ The `blackbox` console script is the same entry point.
 
 ## How a run flows
 
-`run` loads `task.yaml` and the env file, takes the next roster name, copies `fixture/` (and the plumbing for `plumbed`) into a temp workspace, commits a baseline, launches the agent CLI with stdout captured line by line, stops it on exit or timeout, diffs the workspace against the baseline, copies and runs the hidden grader, runs the detectors and claim checks, then redacts and writes `runs/<run_id>/events.jsonl`, `diff.patch`, `grade.json` and `run.json`, and appends the subject to `ledger/agents.jsonl`.
+`run` loads `task.yaml` and the env file, takes the next roster name, copies `fixture/` (and the plumbing for `plumbed`) into a temp workspace, commits a baseline, prepares confinement (sandbox, private home, deny rules, guard hook), launches the agent CLI with stdout captured line by line, stops it on exit or timeout, diffs the workspace against the baseline, copies and runs the hidden grader, runs the detectors and claim checks, then redacts and writes `runs/<run_id>/events.jsonl`, `diff.patch`, `grade.json` and `run.json`, and appends the subject to `ledger/agents.jsonl`.

@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from blackbox import behaviours, claims, ledger, taxonomy
+from blackbox import behaviours, claims, confine, ledger, taxonomy
 from blackbox.envfile import KEY_NAME, agent_env, clean_env, find_env_file, read_env_values
 from blackbox.redact import Redactor
 from blackbox.stream import Stream, parse_line
@@ -28,6 +28,9 @@ ALLOWED_TOOLS = [
     "Bash(python:*)", "Bash(python3:*)", "Bash(pytest:*)",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
 ]
+PERMISSION_MODE = "acceptEdits"
+SETTING_SOURCES = "project,local"
+WORKSPACE_EXCLUDES = "__pycache__/\n*.pyc\n.pytest_cache/\n"
 TASK_FIELDS = ["id", "title", "difficulty", "traps", "timeout_seconds", "max_budget_usd", "max_turns"]
 GRADER_TIMEOUT = 600
 
@@ -49,7 +52,8 @@ class RunOptions:
     timeout_seconds: float | None = None
     keep_workspace: bool = False
     taxonomy_path: Path | None = None
-    isolate_config: bool = False
+    sandbox: str = "auto"
+    extra_env: dict[str, str] = field(default_factory=dict)
 
 
 def utcnow() -> dt.datetime:
@@ -74,6 +78,11 @@ def load_task(task_dir: Path) -> dict[str, Any]:
     return task
 
 
+def default_plumbing_dir(root: Path) -> Path:
+    variant = root / "plumbing" / "variants" / "plumbed"
+    return variant if variant.is_dir() else root / "plumbing"
+
+
 def git(ws: Path, *args: str, check: bool = True) -> str:
     env = clean_env()
     env.update({"GIT_AUTHOR_NAME": "blackbox", "GIT_AUTHOR_EMAIL": "blackbox@localhost",
@@ -96,21 +105,26 @@ def prepare_workspace(task_dir: Path, variant: str, plumbing_dir: Path | None, b
     if (ws / ".git").exists():
         shutil.rmtree(ws / ".git")
     git(ws, "init", "-q", "-b", "main")
+    (ws / ".git" / "info").mkdir(parents=True, exist_ok=True)
+    (ws / ".git" / "info" / "exclude").write_text(WORKSPACE_EXCLUDES)
     git(ws, "add", "-A")
     git(ws, "commit", "-q", "--allow-empty", "-m", "baseline")
     return ws, git(ws, "rev-parse", "HEAD").strip()
 
 
-def build_command(cli: str, prompt: str, opts: RunOptions, task: dict[str, Any], session_id: str, budget: float) -> list[str]:
+def build_command(cli: str, prompt: str, opts: RunOptions, task: dict[str, Any], session_id: str, budget: float,
+                  settings: Path | None = None) -> list[str]:
+    extra = ["--settings", str(settings)] if settings else []
     return [cli, "-p", prompt,
             "--output-format", "stream-json", "--verbose",
             "--model", opts.model,
             "--max-budget-usd", f"{budget:.2f}",
             "--max-turns", str(int(task["max_turns"])),
             "--session-id", session_id,
-            "--permission-mode", "acceptEdits",
-            "--setting-sources", "project,local",
+            "--permission-mode", PERMISSION_MODE,
+            "--setting-sources", SETTING_SOURCES,
             "--strict-mcp-config",
+            *extra,
             "--allowedTools", *ALLOWED_TOOLS]
 
 
@@ -220,7 +234,10 @@ def stop_reason(outcome: AgentOutcome, stream: Stream) -> str:
     if outcome.timed_out:
         return "timeout"
     if stream.result:
-        return str(stream.result.get("subtype") or "unknown")
+        subtype = str(stream.result.get("subtype") or "unknown")
+        if subtype == "success" and stream.result.get("is_error"):
+            return str(stream.result.get("terminal_reason") or "error")
+        return subtype
     return "crash"
 
 
@@ -230,7 +247,7 @@ def run(opts: RunOptions) -> Path:
     task = load_task(task_dir)
     if opts.variant not in ("bare", "plumbed"):
         raise HarnessError("variant must be bare or plumbed")
-    plumbing = (opts.plumbing_dir or root / "plumbing").resolve() if opts.variant == "plumbed" else None
+    plumbing = (opts.plumbing_dir or default_plumbing_dir(root)).resolve() if opts.variant == "plumbed" else None
     env_path = find_env_file(opts.env_file)
     if env_path is None:
         raise HarnessError("no env file found: pass --env-file or set BLACKBOX_ENV_FILE")
@@ -250,26 +267,41 @@ def run(opts: RunOptions) -> Path:
     session_id = str(uuid.uuid4())
     prompt = (task_dir / "PROMPT.md").read_text()
 
-    base = Path(tempfile.mkdtemp(prefix="blackbox-"))
+    base = Path(tempfile.mkdtemp(prefix="blackbox-")).resolve()
     redactor = Redactor(values.values(), {str(base / "workspace"): "<workspace>", str(base): "<tmp>"})
     try:
         ws, baseline = prepare_workspace(task_dir, opts.variant, plumbing, base)
+        plumbing_files = sorted(str(p.relative_to(plumbing)) for p in plumbing.rglob("*") if p.is_file()) if plumbing else []
         redactor.replacements[str(ws.resolve())] = "<workspace>"
+        home = base / "home"
+        redactor.replacements[str(home)] = "<agent-home>"
+        try:
+            conf = confine.prepare(base, ws, home, [root, task_dir], opts.sandbox)
+        except confine.ConfinementError as exc:
+            raise HarnessError(str(exc)) from exc
         env = agent_env(values)
-        if opts.isolate_config:
-            cfg = base / "agent-config"
-            cfg.mkdir()
-            env["CLAUDE_CONFIG_DIR"] = str(cfg)
-        cmd = build_command(opts.agent_cli, prompt, opts, task, session_id, budget)
+        env.update(conf.env)
+        env["CLAUDE_PROJECT_DIR"] = str(ws)
+        env.update(opts.extra_env)
+        prefix = confine.python_prefix()
+        if prefix:
+            env["PATH"] = f"{prefix / 'bin'}:{env.get('PATH', '/usr/bin:/bin')}"
+        found_cli = shutil.which(opts.agent_cli)
+        cli = Path(found_cli).resolve() if found_cli else None
         t0 = time.monotonic()
-        outcome = run_agent(cmd, ws, env, timeout)
+        if cli is None:
+            outcome = AgentOutcome([], [], None, False, "", error=f"could not start the agent CLI: {opts.agent_cli} not found")
+        else:
+            inner = build_command(str(cli), prompt, opts, task, session_id, budget, conf.settings_path)
+            cmd = conf.command(inner, ws, home, confine.read_only_paths(conf, cli))
+            outcome = run_agent(cmd, ws, env, timeout)
         duration_ms = int((time.monotonic() - t0) * 1000)
         ended = utcnow()
         stream = Stream.from_events(outcome.events)
         patch, files = collect_diff(ws, baseline)
         grade = run_grader(task_dir, ws, base)
         reason = stop_reason(outcome, stream)
-        ctx = behaviours.Context(stream, patch, files, grade, task, reason)
+        ctx = behaviours.Context(stream, patch, files, grade, task, reason, str(ws))
         tax = taxonomy.load(opts.taxonomy_path or root / "behaviour" / "taxonomy.yaml")
         found, undetected = behaviours.detect(ctx, tax)
         claim_list = claims.extract(stream.final_text, stream.final_index)
@@ -311,6 +343,7 @@ def run(opts: RunOptions) -> Path:
             "budget_usd": budget,
             "stop_reason": reason,
             "permission_denials": stream.permission_denials(),
+            "hook_blocks": stream.hook_blocks(),
             "files_changed": files,
             "grade": grade,
             "claims": claim_list,
@@ -321,7 +354,11 @@ def run(opts: RunOptions) -> Path:
             "max_turns": int(task["max_turns"]),
             "timeout_seconds": timeout,
             "allowed_tools": ALLOWED_TOOLS,
+            "permission_mode": PERMISSION_MODE,
+            "setting_sources": SETTING_SOURCES,
+            "plumbing_files": plumbing_files,
             "event_count": len(outcome.events),
+            "confinement": conf.record,
         }
         events = [{"i": i, "t_ms": outcome.offsets_ms[i] if i < len(outcome.offsets_ms) else None, "event": e}
                   for i, e in enumerate(outcome.events)]
@@ -338,7 +375,8 @@ def run(opts: RunOptions) -> Path:
                        "cache_read": usage["cache_read_tokens"], "cache_creation": usage["cache_creation_tokens"]},
             "pr": None,
             "outcome": "passed" if grade.get("passed") else ("failed" if reason == "success" else reason),
-            "blocked_actions": [{"event": d["event"], "tool": d["tool_name"]} for d in record["permission_denials"]],
+            "blocked_actions": [{"event": d["event"], "tool": d["tool_name"], "reason": "hook" if "reason" in d else "permission"}
+                                for d in stream.blocks()],
             "run_id": run_id, "task_id": task["id"], "variant": opts.variant,
         }, redactor)
         return run_dir
