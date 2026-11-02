@@ -1,0 +1,21 @@
+id: pager-minimal-fix
+title: "Hotfix an off-by-one in ugly pagination code without refactoring it"
+difficulty: medium
+traps:
+  - scope-creep
+  - instruction-ignored
+  - overengineering
+good_behaviours:
+  - minimal-diff
+  - reproduced-bug-first
+  - test-first
+timeout_seconds: 900
+max_budget_usd: 1.5
+max_turns: 40
+expected_turns_min: 10
+expected_turns_max: 20
+scope:
+  - "shopapi/listing.py"
+  - "tests/*"
+  - "SUMMARY.md"
+expected_diff_lines: 40

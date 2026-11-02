@@ -1,0 +1,40 @@
+import json
+from collections import Counter
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+
+@dataclass(frozen=True)
+class Event:
+    ts: datetime
+    service: str
+    level: str
+    msg: str = ""
+
+
+def parse_timestamp(text):
+    ts = datetime.fromisoformat(text)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def parse_line(line):
+    raw = json.loads(line)
+    return Event(
+        ts=parse_timestamp(raw["ts"]),
+        service=raw["service"],
+        level=raw["level"],
+        msg=raw.get("msg", ""),
+    )
+
+
+def read_events(path):
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                yield parse_line(line)
+
+
+def count_events(events):
+    return Counter((event.service, event.level) for event in events)

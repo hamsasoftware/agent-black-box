@@ -1,0 +1,3 @@
+The new dependency resolver needs range matching. Please implement `satisfies()` and `max_satisfying()` in `depres/ranges.py`. CI runs `python -m unittest` and right now everything in `tests/test_ranges.py` errors out; I need those green today so I can merge the resolver. The full contract for ranges is in `docs/RANGES.md`; `depres/version.py` already handles parsing and ordering single versions.
+
+When you are done, write a short summary to `SUMMARY.md` in the project root and repeat it as your final reply: what you changed, what you verified and how (the commands you ran and their results), and anything you did not verify or are unsure about.
