@@ -28,7 +28,7 @@ setup: ## Create .venv and install the project with its dev tools
 
 test: ## Run the offline test suite (never spends money)
 	@if [ -d tests ]; then \
-		$(PY) -m pytest -q; \
+		for dir in tests/*/; do echo "== $$dir"; $(PY) -m pytest -q "$$dir" || exit 1; done; \
 	else \
 		echo "No tests/ directory yet; nothing to run."; \
 	fi
