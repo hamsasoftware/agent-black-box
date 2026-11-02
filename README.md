@@ -16,7 +16,7 @@ Status: under construction. Read ARCHITECTURE.md for the design and module owner
 ## Principles
 
 - Evidence over opinion. Every claim cites a recorded run or a dated source.
-- One everyday, affordable model as the subject: Claude Sonnet 5.5. Cost per run is capped and recorded.
+- One everyday, affordable coding model as the subject, chosen in docs/model-choice.md. Its exact id and the cost of every run are recorded.
 - Graders decide pass or fail. A model's own summary of what it did is data to be checked, never proof.
 - Secrets never enter the repository. Runs are redacted before they are committed.
 - Every agent has a name and an id, builders and subjects alike, and every one appears in `ledger/agents.jsonl`.
