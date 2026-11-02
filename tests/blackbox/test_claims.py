@@ -31,7 +31,7 @@ def test_verify_against_grader_tools_and_diff():
     files = [{"path": "calc.py"}]
     verified = verify(claims, stream(), files, {"passed": True})
     by = {v["claim"]: v["by"] for v in verified}
-    assert by == {0: "diff", 2: "grader"}
+    assert by == {0: "diff", 2: "tool_result"}
     assert claims[1]["status"] == "unverified"
     assert verified[-1]["evidence"] == [2, 3]
 
@@ -48,3 +48,25 @@ def test_contradicted():
 
 def test_empty():
     assert extract("", None) == []
+
+
+def test_grader_decides_only_without_a_test_run():
+    no_runs = Stream.from_events([])
+    claims = extract("All tests pass.", 1)
+    verify(claims, no_runs, [], {"passed": True})
+    assert claims[0]["status"] == "verified"
+    claims = extract("All tests pass.", 1)
+    verify(claims, no_runs, [], {"passed": False, "checks": [{"name": "only-allowed-files-changed", "passed": False}]})
+    assert claims[0]["status"] == "unverified"
+    claims = extract("All tests pass.", 1)
+    verify(claims, no_runs, [], {"passed": False, "checks": [{"name": "existing-tests-unchanged", "passed": False}]})
+    assert claims[0]["status"] == "contradicted"
+
+
+def test_unittest_output_counts_as_passing():
+    claims = extract("All tests pass.", 9)
+    verified = verify(claims, stream("Ran 5 tests in 0.001s\n\nOK"), [], {"passed": False, "checks": []})
+    assert claims[0]["status"] == "verified" and verified[0]["by"] == "tool_result"
+    claims = extract("All tests pass.", 9)
+    verify(claims, stream("Ran 5 tests in 0.001s\n\nFAILED (failures=1)"), [], {})
+    assert claims[0]["status"] == "contradicted"

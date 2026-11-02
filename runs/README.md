@@ -28,6 +28,7 @@ One directory per recorded run of a subject agent on a task. Everything here has
 ## Regenerating aggregates
 
 ```
+python -m blackbox reanalyse  # re-runs the detectors and claim checks after a detector change
 python -m blackbox index      # rewrites runs/index.jsonl from runs/*/run.json
 python -m blackbox report     # rewrites docs/results.md
 python -m blackbox validate   # checks every run.json and ledger/agents.jsonl

@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from blackbox import report, schema, transcript
+from blackbox import reanalyse, report, schema, transcript
 from blackbox.live import LiveView, resolve_run, watch
 from blackbox.envfile import find_env_file, read_env_values
 from blackbox.redact import Redactor, scan
@@ -47,6 +47,27 @@ def cmd_watch(a: argparse.Namespace) -> int:
         return watch(run_dir, view, follow=not a.no_follow, timeout=a.timeout, replay=a.replay)
     except KeyboardInterrupt:
         return 130
+
+
+def cmd_reanalyse(a: argparse.Namespace) -> int:
+    root = Path(a.root)
+    runs_dir = Path(a.runs) if a.runs else root / "runs"
+    results = reanalyse.reanalyse(runs_dir, root, Path(a.taxonomy) if a.taxonomy else None, write=not a.dry_run)
+    errors = 0
+    for r in results:
+        if "error" in r:
+            errors += 1
+            print(f"{r['run_id']}: error: {r['error']}")
+            continue
+        added = sorted(set(r["after"]) - set(r["before"]))
+        removed = sorted(set(r["before"]) - set(r["after"]))
+        change = ("updated" if not a.dry_run else "would update") if r["changed"] else "unchanged"
+        detail = "".join([f"  +{x}" for x in added] + [f"  -{x}" for x in removed])
+        print(f"{r['run_id']}: {change}{detail}")
+    print(f"\n{len(results)} runs, {errors} errors. Behaviours by number of runs:")
+    for line in reanalyse.summary(results, runs_dir):
+        print(line)
+    return 1 if errors else 0
 
 
 def cmd_scan(a: argparse.Namespace) -> int:
@@ -115,6 +136,13 @@ def parser() -> argparse.ArgumentParser:
                     help="bwrap confinement: auto uses it when it works, required fails without it")
     common(sp)
     sp.set_defaults(fn=cmd_run)
+
+    sp = sub.add_parser("reanalyse", help="re-run detectors and claim checks over recorded runs")
+    sp.add_argument("--runs", default=None, help="runs directory (default: ROOT/runs)")
+    sp.add_argument("--root", default=".", help="repository root holding tasks/ and behaviour/")
+    sp.add_argument("--taxonomy", default=None)
+    sp.add_argument("--dry-run", action="store_true", help="report without rewriting run.json")
+    sp.set_defaults(fn=cmd_reanalyse)
 
     sp = sub.add_parser("watch", help="render a run live, or replay a finished one")
     sp.add_argument("run", help="run directory, run id, or a unique part of one")

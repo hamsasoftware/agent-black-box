@@ -8,11 +8,14 @@ from typing import Any
 
 DENIAL_TEXT = re.compile(
     r"(?i)(requested permissions? to use|haven't granted it|permission (?:for this action )?(?:was )?denied|"
-    r"not allowed by|denied by|permission to use .* (?:was|has been) denied)")
+    r"not allowed by|denied by|permission to use .* (?:was|has been) denied|requires? approval|"
+    r"can't be checked before it runs|hide arguments from path validation)")
 HOOK_TEXT = re.compile(r"(?i)(PreToolUse:\S* hook|hook error|blocked by hook|blocked by (?:the workspace )?guard)")
-TEST_COMMAND = re.compile(r"(?:^|[\s;&|(])(?:pytest|py\.test|python[0-9.]* -m (?:pytest|unittest)|tox|nox|make test)\b")
-FAILURE_TEXT = re.compile(r"(?i)(\b\d+ failed\b|\bFAILED\b|\bERROR\b|Traceback \(most recent call last\)|\berrors?\b during collection|AssertionError)")
-PASS_TEXT = re.compile(r"(?i)\b\d+ passed\b")
+TEST_COMMAND = re.compile(r"(?:^|[\s;&|(])(?:pytest|py\.test|python[0-9.]*(?:\s+-[A-Za-ln-z]\w*(?:\s+(?!-)[\w.:=-]+)?)*\s+-m\s*(?:pytest|unittest)|tox|nox|make test)\b")
+FAILURE_TEXT = re.compile(r"(\b\d+ failed\b|\bFAILED\b|^ERROR\b|Traceback \(most recent call last\)|\berrors? during collection|AssertionError)", re.M)
+PASS_TEXT = re.compile(r"(?i)\b\d+ passed\b|\bRan \d+ tests? in [\d.]+s\s+OK\b")
+DOC_SUFFIXES = (".md", ".rst", ".txt", ".adoc")
+BASH_WRITE = re.compile(r"\bsed -i|\.write_text\(|open\((?!\s*['\"]/dev/)[^)]*,\s*['\"][wa]|\bgit (?:apply|checkout --|restore)\b|\bpatch -p")
 
 
 def parse_line(line: str) -> dict[str, Any]:
@@ -59,6 +62,16 @@ class ToolUse:
         return self.name in ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
     @property
+    def is_bash_edit(self) -> bool:
+        return bool(self.command) and bool(BASH_WRITE.search(self.command))
+
+    @property
+    def is_code_edit(self) -> bool:
+        if self.is_edit:
+            return not self.path.lower().endswith(DOC_SUFFIXES)
+        return self.is_bash_edit
+
+    @property
     def is_test_run(self) -> bool:
         return bool(self.command and TEST_COMMAND.search(self.command))
 
@@ -86,12 +99,16 @@ class ToolResult:
         return self.is_error and bool(DENIAL_TEXT.search(self.text))
 
     @property
+    def executed(self) -> bool:
+        return not (self.is_denial or self.is_hook_block or self.text.lstrip().startswith("<tool_use_error>"))
+
+    @property
     def looks_failed(self) -> bool:
-        return self.is_error or bool(FAILURE_TEXT.search(self.text))
+        return bool(FAILURE_TEXT.search(self.text)) or (self.is_error and not PASS_TEXT.search(self.text))
 
     @property
     def looks_passed(self) -> bool:
-        return not self.is_error and bool(PASS_TEXT.search(self.text)) and not FAILURE_TEXT.search(self.text)
+        return bool(PASS_TEXT.search(self.text)) and not FAILURE_TEXT.search(self.text)
 
 
 @dataclass
@@ -153,6 +170,10 @@ class Stream:
             if r.tool_use_id == tool_use_id:
                 return r
         return None
+
+    def ran(self, tool: ToolUse) -> bool:
+        res = self.result_for(tool.id)
+        return res is None or res.executed
 
     def tool_use(self, tool_use_id: str) -> ToolUse | None:
         for t in self.tool_uses:
