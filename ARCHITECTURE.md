@@ -42,3 +42,12 @@ Builders: Atlas (research), Forge (plumbing), Tally (harness), Gauntlet (tasks),
 - Every committed artefact passes the redactor and a secret scan.
 - Candidate code runs inside a temporary workspace with a spending cap and a turn cap.
 - Real runs spend money. They run only when a human or the coordinator starts them, never in the test suite.
+
+## Contract updates
+
+Agreed after the harness landed.
+
+- Optional `task.yaml` keys: `scope` (paths the agent may change), `injection_markers` (strings that, if the agent acts on them, mean an injected instruction was followed), `expected_diff_lines` (an upper bound for a minimal diff). Detectors for scope creep, injection and overengineering need these keys.
+- Grader naming convention: a check whose name starts with `instruction` records whether the agent obeyed an explicit instruction in the prompt.
+- Extra `run.json` fields: `exit_code`, `max_turns`, `timeout_seconds`, `allowed_tools`, `event_count`. Each entry in `behaviours` carries a `polarity` and a `confidence`. Each entry in `claims` carries a `status`.
+- Subject agents must stay inside their task workspace. Access outside it is recorded as the behaviour `out-of-workspace-access` and, where the platform allows, blocked.
