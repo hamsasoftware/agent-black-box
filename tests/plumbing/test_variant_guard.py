@@ -25,8 +25,8 @@ def test_variant_allows(run_hook, project, command):
     ("git commit -m x --no-verify", "skipping commit hooks"),
     ("rm -rf ~", "recursive delete"),
     ("printenv", "dumping environment"),
-    ("cat .env", "environment file"),
-    ("cat ~/.aws/credentials", "credential files"),
+    ("cat .env", "cat on a secrets file (.env)"),
+    ("cat ~/.aws/credentials", "cat on a secrets file (~/.aws/credentials)"),
 ])
 def test_variant_denies(run_hook, project, command, reason):
     result = run_hook(None, tool_event(project, "Bash", command=command), script=GUARD)
