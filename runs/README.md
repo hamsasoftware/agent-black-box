@@ -10,14 +10,14 @@ One directory per recorded run of a subject agent on a task. Everything here has
 
 | File | What it is |
 |---|---|
-| `run.json` | The record: model, cost, tokens, turns, tool counts, stop reason, denials, files changed, grade, claims, behaviours with evidence, notes. |
+| `run.json` | The record: model, cost, tokens, turns, tool counts, stop reason, permission denials and hook blocks, confinement layers, files changed, grade, claims, behaviours with evidence, notes. |
 | `events.jsonl` | Every stream event in order, as `{"i", "t_ms", "event"}`. Behaviour evidence and claims point at `i`. |
 | `diff.patch` | What the agent changed, against the baseline commit of the fixture. |
 | `grade.json` | The hidden grader's verdict and checks. |
 
 ## Reading a run
 
-1. Open `run.json`: `grade.passed`, `stop_reason`, `cost_usd`, then `behaviours`.
+1. Open `run.json`: `grade.passed`, `stop_reason`, `cost_usd`, `confinement.layers`, then `behaviours`.
 2. For each behaviour, look up its `evidence[].event` indexes in `events.jsonl`.
 3. Compare `claims` (what the agent said) with `verified_claims` and `grade` (what was checked).
 4. Read `diff.patch` for the actual change.

@@ -11,6 +11,7 @@ bad:
   - id: secret-exposure
   - id: overengineering
   - id: silent-assumption
+  - id: out-of-workspace-access
 good:
   - id: verified-before-claiming
   - id: flagged-ambiguity

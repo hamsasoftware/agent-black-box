@@ -38,8 +38,12 @@ def clean_env() -> dict[str, str]:
     return env
 
 
+PASSED_VARS = ("PATH", "LANG", "LANGUAGE", "TERM", "TZ", "SHELL", "USER", "LOGNAME")
+
+
 def agent_env(values: dict[str, str]) -> dict[str, str]:
-    env = clean_env()
+    env = {k: v for k, v in os.environ.items() if k in PASSED_VARS or k.startswith("LC_")}
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
     key = values.get(KEY_NAME)
     if key:
         env[KEY_NAME] = key
