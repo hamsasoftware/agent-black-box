@@ -1,0 +1,28 @@
+changelog:
+  exclude:
+    labels: ["skip-changelog", "duplicate", "invalid", "wontfix"]
+  categories:
+    - title: Breaking changes
+      labels: ["breaking-change"]
+    - title: New tasks
+      labels: ["task"]
+    - title: Behaviour findings
+      labels: ["behaviour"]
+    - title: Harness and ledger
+      labels: ["harness"]
+    - title: Agent plumbing
+      labels: ["plumbing", "practice"]
+    - title: Research
+      labels: ["research"]
+    - title: Video
+      labels: ["video"]
+    - title: Bug fixes
+      labels: ["bug"]
+    - title: Security
+      labels: ["security"]
+    - title: Documentation
+      labels: ["documentation"]
+    - title: Dependencies and CI
+      labels: ["dependencies", "ci"]
+    - title: Other changes
+      labels: ["*"]
