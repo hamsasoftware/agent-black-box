@@ -62,8 +62,8 @@ def filled_evidence(text: str) -> bool:
 def description_problems(title: str, body: str) -> list[str]:
     found: list[str] = []
     names, parts = sections(body or "")
-    if names[: len(SECTIONS)] != list(SECTIONS):
-        return [f"description must start with these sections in order: {', '.join(SECTIONS)}"]
+    if [name for name in names if name in SECTIONS] != list(SECTIONS):
+        return [f"description must contain these sections once each and in this order, with extra sections allowed between them: {', '.join(SECTIONS)}"]
     purpose = re.sub(r"^Closes.*$", "", parts["Purpose"], flags=re.IGNORECASE | re.MULTILINE).strip()
     if not purpose:
         found.append("Purpose must say what the change does and why")

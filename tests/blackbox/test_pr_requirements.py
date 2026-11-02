@@ -81,8 +81,8 @@ def test_the_good_body_is_built_from_the_real_template_headings():
 
 
 @pytest.mark.parametrize("edit, fragment", [
-    (lambda b: b.replace("## Evidence\n\nnone\n\n", ""), "must start with these sections"),
-    (lambda b: b.replace("## Tests", "## Testing"), "must start with these sections"),
+    (lambda b: b.replace("## Evidence\n\nnone\n\n", ""), "must contain these sections once each"),
+    (lambda b: b.replace("## Tests", "## Testing"), "must contain these sections once each"),
     (lambda b: b.replace("Closes: none (no issue)", ""), "Closes #N"),
     (lambda b: b.replace("Fixes the thing and explains why.\n\n", ""), "Purpose must say"),
     (lambda b: b.replace("- [x] Documentation", "- [ ] Documentation"), "tick at least one"),
@@ -234,3 +234,15 @@ def test_main_reports_unreadable_input_and_a_bad_base(tmp_path, monkeypatch, cap
     (tmp_path / "bad.json").write_text("{broken", encoding="utf-8")
     assert check.main(["--event", str(tmp_path / "bad.json"), "--base", "main"]) == 1
     assert capsys.readouterr().err.count("pr-requirements:") == 3
+
+
+def test_extra_sections_are_allowed_between_and_after_the_template_sections():
+    body = GOOD.replace("## Evidence", "## What is included\n\n- one thing\n\n## Evidence") + "\n## Details\n\nThe original text.\n"
+    assert check.description_problems("t", body) == []
+
+
+def test_a_repeated_or_reordered_template_section_fails():
+    repeated = GOOD + "\n## Purpose\n\nAgain.\n"
+    assert any("once each" in line for line in check.description_problems("t", repeated))
+    swapped = GOOD.replace("## Tests", "## TMP").replace("## Evidence", "## Tests").replace("## TMP", "## Evidence")
+    assert any("once each" in line for line in check.description_problems("t", swapped))
