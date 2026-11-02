@@ -73,13 +73,19 @@ def test_plumbed_agents_md_is_compact():
 def test_plumbed_variant_is_neutral():
     forbidden = re.compile(r"black.?box|experiment|bare|plumbed|anthropic|claude(?!_PROJECT_DIR)|openai|gpt|gemini|copilot|cursor", re.I)
     for path in (VARIANTS / "plumbed").rglob("*"):
-        if path.is_file() and path.name != "CLAUDE.md":
+        if path.is_file() and path.name != "CLAUDE.md" and "__pycache__" not in path.parts:
             text = path.read_text().replace(".claude/", "")
             assert not forbidden.search(text), (path, forbidden.search(text).group(0))
 
 
 def test_hooks_use_standard_library_only():
-    allowed = {"json", "os", "re", "sys", "datetime", "pathlib", "_hooklib"}
+    allowed = {"json", "os", "re", "shlex", "sys", "datetime", "pathlib", "_hooklib", "command_policy"}
     for path in list(HOOKS.glob("*.py")) + list((VARIANTS / "plumbed" / ".claude" / "hooks").glob("*.py")):
         imports = re.findall(r"^(?:from|import)\s+([\w_]+)", path.read_text(), re.M)
         assert set(imports) <= allowed, (path, imports)
+
+
+def test_command_policy_copies_are_identical():
+    repo_copy = (HOOKS / "command_policy.py").read_bytes()
+    variant_copy = (VARIANTS / "plumbed" / ".claude" / "hooks" / "command_policy.py").read_bytes()
+    assert repo_copy == variant_copy

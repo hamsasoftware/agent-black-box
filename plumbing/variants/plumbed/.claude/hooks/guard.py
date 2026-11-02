@@ -1,28 +1,14 @@
 #!/usr/bin/env python3
 import json
-import re
 import sys
+from pathlib import Path
 
-SECRET_PATH = re.compile(
-    r"(?:^|/)(?:\.env(?!\.example$)(?:\.[^/]*)?|\.netrc|\.pypirc|credentials(?:\.json)?|"
-    r"id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]*\.(?:pem|p12|pfx))$|(?:^|/)\.(?:ssh|aws|gnupg)(?:/|$)"
-)
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from command_policy import Blocked, Policy, check_command, is_secret_path  # noqa: E402
 
-BASH_RULES = [
-    (re.compile(r"\b(?:curl|wget)\b[^;&]*\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b"),
-     "piping a download into a shell"),
-    (re.compile(r"\bgit\s+push\b"), "pushing"),
-    (re.compile(r"\bgit\s+reset\s+[^;&|]*--hard\b"), "git reset --hard"),
-    (re.compile(r"\bgit\s+clean\s+[^;&|]*-[a-zA-Z]*f"), "git clean -f"),
-    (re.compile(r"\bgit\s+commit\b[^;&|]*--no-verify\b"), "skipping commit hooks"),
-    (re.compile(r"\brm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*\s+)+(?:--\s+)?(?:/|~|\$HOME|\.\.?|\*|\.git)(?:/?\s|/?$)"),
-     "recursive delete of a root, home, parent or repository directory"),
-    (re.compile(r"\bprintenv\b|(?:^|[;&|]\s*)env\s*(?:$|[;&|>])"), "dumping environment variables"),
-    (re.compile(r"(?:^|[\s<>|;&'\"=/])\.env(?!\.example\b)(?:\.[\w.-]+)?(?=$|[\s;&|'\")])"),
-     "touching an environment file"),
-    (re.compile(r"(?:~|\$HOME)/\.(?:ssh|aws|gnupg|netrc|pypirc)\b|\bid_(?:rsa|ed25519|ecdsa|dsa)\b"),
-     "reading credential files"),
-]
+POLICY = Policy(block_push=True)
+PATH_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep"}
 
 
 def block(reason):
@@ -43,13 +29,16 @@ def main():
         command = tool_input.get("command")
         if not isinstance(command, str):
             block("Bash call without a command string")
-        for pattern, reason in BASH_RULES:
-            if pattern.search(command):
-                block(reason)
-    else:
-        for key in ("file_path", "path", "notebook_path"):
+        try:
+            check_command(command, POLICY)
+        except Blocked as exc:
+            block(exc.reason)
+        except RecursionError:
+            block("command nested too deeply to check")
+    elif tool in PATH_TOOLS:
+        for key in ("file_path", "path", "notebook_path", "glob"):
             value = tool_input.get(key)
-            if isinstance(value, str) and SECRET_PATH.search(value):
+            if isinstance(value, str) and is_secret_path(value):
                 block(f"{tool} on a secrets file")
     sys.exit(0)
 
