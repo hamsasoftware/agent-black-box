@@ -64,3 +64,12 @@ def test_grader_without_result(do_run, task_dir):
     _, rec, _ = do_run("success")
     assert rec["grade"]["passed"] is False and "exit 4" in rec["grade"]["error"]
     assert rec["stop_reason"] == "success"
+
+
+def test_cli_task_id(root, task_dir, env_file, capsys):
+    import shutil
+    shutil.copytree(task_dir, root / "tasks" / "demo-add")
+    code = main(["run", "--task", "demo-add", "--variant", "bare", "--model", "m", "--sandbox", "off",
+                 "--root", str(root), "--env-file", str(env_file), "--agent-cli", str(FIXTURES / "fake_agent.py")])
+    assert code == 0 and "demo-add-bare" in capsys.readouterr().out
+    assert main(["run", "--variant", "bare", "--model", "m", "--root", str(root)]) == 2

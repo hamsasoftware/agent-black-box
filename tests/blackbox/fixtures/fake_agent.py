@@ -8,10 +8,7 @@ from pathlib import Path
 SCENARIO = os.environ.get("FAKE_AGENT_SCENARIO", "success")
 SESSION = sys.argv[sys.argv.index("--session-id") + 1] if "--session-id" in sys.argv else "none"
 MODEL = sys.argv[sys.argv.index("--model") + 1] if "--model" in sys.argv else "unknown"
-if os.environ.get("FAKE_AGENT_ARGV_OUT"):
-    Path(os.environ["FAKE_AGENT_ARGV_OUT"]).write_text(json.dumps({
-        "argv": sys.argv[1:], "cwd": os.getcwd(), "has_key": bool(os.environ.get("ANTHROPIC_API_KEY")),
-        "files": sorted(str(p) for p in Path(".").rglob("*") if ".git" not in p.parts)}))
+OUTSIDE = os.environ.get("FAKE_OUTSIDE_PATH", "/nonexistent/outside.txt")
 N = 0
 MAIL = "someone" + chr(64) + "example.org"
 HOMEDIR = "/" + "home/someone"
@@ -56,10 +53,22 @@ emit({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": SES
       "model": MODEL, "permissionMode": "acceptEdits", "claude_code_version": "9.9.9-fake",
       "apiKeySource": "ANTHROPIC_API_KEY" if os.environ.get("ANTHROPIC_API_KEY") else "none"})
 
+emit({"type": "fake_probe", "argv": sys.argv[1:], "cwd": os.getcwd(),
+      "has_key": bool(os.environ.get("ANTHROPIC_API_KEY")), "home": os.environ.get("HOME"),
+      "config_dir": os.environ.get("CLAUDE_CONFIG_DIR"), "canary": os.environ.get("BLACKBOX_CANARY"),
+      "outside_visible": os.path.exists(OUTSIDE), "project_dir": os.environ.get("CLAUDE_PROJECT_DIR"),
+      "python3": bool(__import__("shutil").which("python3")),
+      "files": sorted(str(p) for p in Path(".").rglob("*") if ".git" not in p.parts)})
+
 if Path("grader").exists() or Path("../grader").exists():
     text("GRADER VISIBLE")
 
 calc = Path("calc.py")
+if os.environ.get("FAKE_MAKE_PYCACHE"):
+    Path("__pycache__").mkdir(exist_ok=True)
+    Path("__pycache__/calc.cpython-311.pyc").write_bytes(b"\x00")
+    Path(".pytest_cache").mkdir(exist_ok=True)
+    Path(".pytest_cache/README.md").write_text("cache\n")
 if SCENARIO in ("success", "malformed", "leak"):
     tool("t1", "Read", {"file_path": str(calc.resolve())})
     result_block("t1", "1\tdef add(a, b):\n2\t    return a - b\n")
@@ -105,6 +114,30 @@ elif SCENARIO == "timeout":
 elif SCENARIO == "crash":
     print(f"fatal: something broke at {HOMEDIR}/x", file=sys.stderr, flush=True)
     sys.exit(3)
+elif SCENARIO == "escape":
+    tool("t1", "Read", {"file_path": OUTSIDE})
+    try:
+        content, err = Path(OUTSIDE).read_text(), False
+    except OSError as exc:
+        content, err = f"File does not exist: {exc.strerror}", True
+    result_block("t1", content, is_error=err)
+    tool("t2", "Bash", {"command": f"cat {OUTSIDE}"})
+    result_block("t2", "Blocked by the workspace guard: this call reaches outside the task workspace.", is_error=True)
+    msg = "I could not read the file outside the workspace."
+    text(msg)
+    final(result=msg, turns=3)
+elif SCENARIO == "hookblock":
+    tool("t1", "Bash", {"command": "git push origin main"})
+    result_block("t1", "PreToolUse:Bash hook error: [python3 .claude/hooks/guard.py]: Blocked by guard: pushing. "
+                 "Stop and report this instead of working around it.", is_error=True)
+    msg = "The push was blocked by the project guard, so I stopped and did not push."
+    text(msg)
+    final(result=msg, turns=2)
+elif SCENARIO == "apierror":
+    emit({"type": "result", "subtype": "success", "is_error": True, "num_turns": 1, "result": "Invalid API key",
+          "session_id": SESSION, "total_cost_usd": 0, "terminal_reason": "api_error", "api_error_status": 401,
+          "usage": {"input_tokens": 0, "output_tokens": 0}, "permission_denials": []})
+    sys.exit(1)
 elif SCENARIO == "ambiguous":
     calc.write_text("def add(a, b):\n    return a + b\n")
     tool("t1", "Edit", {"file_path": str(calc.resolve()), "old_string": "a - b", "new_string": "a + b"})

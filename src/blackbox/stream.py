@@ -9,6 +9,7 @@ from typing import Any
 DENIAL_TEXT = re.compile(
     r"(?i)(requested permissions? to use|haven't granted it|permission (?:for this action )?(?:was )?denied|"
     r"not allowed by|denied by|permission to use .* (?:was|has been) denied)")
+HOOK_TEXT = re.compile(r"(?i)(PreToolUse:\S* hook|hook error|blocked by hook|blocked by (?:the workspace )?guard)")
 TEST_COMMAND = re.compile(r"(?:^|[\s;&|(])(?:pytest|py\.test|python[0-9.]* -m (?:pytest|unittest)|tox|nox|make test)\b")
 FAILURE_TEXT = re.compile(r"(?i)(\b\d+ failed\b|\bFAILED\b|\bERROR\b|Traceback \(most recent call last\)|\berrors?\b during collection|AssertionError)")
 PASS_TEXT = re.compile(r"(?i)\b\d+ passed\b")
@@ -68,9 +69,20 @@ class ToolResult:
     tool_use_id: str
     is_error: bool
     text: str
+    decision: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_hook_block(self) -> bool:
+        if self.decision.get("decision") == "reject":
+            return self.decision.get("source") == "hook"
+        return self.is_error and bool(HOOK_TEXT.search(self.text))
 
     @property
     def is_denial(self) -> bool:
+        if self.is_hook_block:
+            return False
+        if self.decision.get("decision") == "reject":
+            return True
         return self.is_error and bool(DENIAL_TEXT.search(self.text))
 
     @property
@@ -124,11 +136,16 @@ class Stream:
                     elif btype == "text" and block.get("text"):
                         s.texts.append(Texts(i, str(block["text"])))
             elif kind == "user":
+                decisions = {}
+                for meta in ev.get("tool_result_meta") or []:
+                    if isinstance(meta, dict) and isinstance(meta.get("permission_decision"), dict):
+                        decisions[str(meta.get("id", ""))] = meta["permission_decision"]
                 for block in _content(ev):
                     if block.get("type") == "tool_result":
+                        tid = str(block.get("tool_use_id", ""))
                         s.tool_results.append(ToolResult(
-                            i, str(block.get("tool_use_id", "")), bool(block.get("is_error")),
-                            result_text(block.get("content"))))
+                            i, tid, bool(block.get("is_error")), result_text(block.get("content")),
+                            decisions.get(tid, {})))
         return s
 
     def result_for(self, tool_use_id: str) -> ToolResult | None:
@@ -204,6 +221,12 @@ class Stream:
             return float(self.result["total_cost_usd"])
         return None
 
+    def hook_blocks(self) -> list[dict[str, Any]]:
+        return _hook_block_list(self)
+
+    def blocks(self) -> list[dict[str, Any]]:
+        return sorted(self.permission_denials() + self.hook_blocks(), key=lambda d: (d.get("event") is None, d.get("event") or 0))
+
     def permission_denials(self) -> list[dict[str, Any]]:
         denials: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -211,6 +234,9 @@ class Stream:
             if not isinstance(d, dict):
                 continue
             tid = str(d.get("tool_use_id", ""))
+            res = self.result_for(tid)
+            if res is not None and res.is_hook_block:
+                continue
             tool = self.tool_use(tid)
             denials.append({
                 "tool_name": d.get("tool_name") or (tool.name if tool else None),
@@ -230,6 +256,16 @@ class Stream:
                 })
                 seen.add(r.tool_use_id)
         return denials
+
+
+def _hook_block_list(s: "Stream") -> list[dict[str, Any]]:
+    out = []
+    for r in s.tool_results:
+        if r.is_hook_block:
+            tool = s.tool_use(r.tool_use_id)
+            out.append({"tool_name": tool.name if tool else None, "tool_use_id": r.tool_use_id,
+                        "tool_input": tool.input if tool else {}, "event": r.index, "reason": r.text[:300]})
+    return out
 
 
 def _content(ev: dict[str, Any]) -> list[dict[str, Any]]:

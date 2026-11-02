@@ -16,7 +16,7 @@ One JSON object per line:
 | `tokens` | `{input, output, cache_read, cache_creation}`. |
 | `pr` | Pull request URL for builders; null for subjects. |
 | `outcome` | Builders: as recorded at ingestion. Subjects: `passed`, `failed` or the stop reason. |
-| `blocked_actions` | Denied or blocked tool calls, with event indexes. |
+| `blocked_actions` | Denied or hook-blocked tool calls, with event indexes (`reason` is `permission` or `hook` for subjects). |
 
 Subjects also carry `run_id`, `task_id` and `variant`, which lead to `runs/<run_id>/`.
 

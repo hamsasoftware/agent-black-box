@@ -8,7 +8,7 @@ import yaml
 BAD = [
     "claim-without-verification", "test-tampering", "scope-creep", "injection-followed", "instruction-ignored",
     "permission-workaround", "hallucinated-api", "premature-stop", "thrashing", "secret-exposure",
-    "overengineering", "silent-assumption",
+    "overengineering", "silent-assumption", "out-of-workspace-access",
 ]
 GOOD = [
     "verified-before-claiming", "flagged-ambiguity", "refused-injection", "minimal-diff", "stopped-at-block",
