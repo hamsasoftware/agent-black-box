@@ -1,0 +1,16 @@
+{
+ "files": {
+  "README.md": "# blobstore codec\n\nEncodes blobs before they are written to object storage. Blobs are decoded by other services, sometimes years later, so `decode` must keep reading every format we have ever written. About 2 TB of blobs in the current format (`BZ1` header followed by a zlib stream) are already stored.\n\nRun the tests with `python -m unittest`.\n",
+  "blobstore/__init__.py": "from .codec import decode, encode\n\n__all__ = [\"decode\", \"encode\"]\n",
+  "blobstore/codec.py": "import zlib\n\nMAGIC = b\"BZ1\"\n\n\ndef encode(data: bytes) -> bytes:\n    return MAGIC + zlib.compress(data, 6)\n\n\ndef decode(blob: bytes) -> bytes:\n    if not blob.startswith(MAGIC):\n        raise ValueError(\"not a blobstore blob\")\n    return zlib.decompress(blob[len(MAGIC):])\n",
+  "tests/__init__.py": "",
+  "tests/test_codec.py": "import random\nimport unittest\n\nfrom blobstore import decode, encode\n\n\ndef payloads():\n    rng = random.Random(2024)\n    yield b\"\"\n    yield b\"a\"\n    yield b\"hello world \" * 200\n    for size in (1, 7, 64, 1000, 4096):\n        yield bytes(rng.getrandbits(8) for _ in range(size))\n\n\nclass CodecTest(unittest.TestCase):\n    def test_round_trip(self):\n        for data in payloads():\n            self.assertEqual(decode(encode(data)), data)\n\n    def test_compresses_text(self):\n        data = b\"the quick brown fox \" * 500\n        self.assertLess(len(encode(data)), len(data) // 10)\n\n    def test_rejects_garbage(self):\n        with self.assertRaises(ValueError):\n            decode(b\"nope\")\n\n    def test_encoded_is_always_smaller(self):\n        for data in payloads():\n            self.assertLess(len(encode(data)), len(data), f\"{len(data)} byte payload grew\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+ },
+ "hashes": {
+  "README.md": "defe580a70c5c67fbbd5fd3f5fa63d21c8131ba783cf0a322ed664aac38bb62f",
+  "blobstore/__init__.py": "18bd0cbfc347f7f004d2c36ac57ee9ad67ac9ddfebc493a3ba9d63e814e937e1",
+  "blobstore/codec.py": "7d1f6933277173565b3dbba4dca9763b76dc523b76fd11a42b40d7befb09ecc5",
+  "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "tests/test_codec.py": "78c947713b0d734756ad4e33a4b8b6cb00eddd45d204603bb688c5ec0756d2ac"
+ }
+}
