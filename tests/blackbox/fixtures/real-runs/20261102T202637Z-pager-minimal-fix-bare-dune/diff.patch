@@ -1,0 +1,58 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..2d5d96a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,24 @@
++# Summary
++
++**Bug:** `getPageCount` in `shopapi/listing.py` used floor division, so a partial last page was never fetched. With 237 products only 200 were exported.
++
++**Change:**
++- `shopapi/listing.py`: `getPageCount` now uses `math.ceil(totalItems / pageSize)`. `math` was already imported.
++- `tests/test_listing.py`: added `test_page_count_partial_page`, which checks `getPageCount(237, 50) == 5` and `getPageCount(0, 50) == 0`.
++- The existing `test_export_includes_last_product` was already failing and now passes.
++- `generated/` and `legacy/` are untouched.
++
++**Verified:**
++- `python -m unittest` failed before the fix (last id `P00200`, expected `P00237`). After the fix it ran 5 tests, all OK.
++- `python -m shopapi export` now outputs 238 lines (header plus 237 products), and the last row is `P00237`.
++
++**Not verified:**
++- I only ran against the stubbed `CatalogClient` in `generated/`, not a real catalogue service.
++- The float division in `math.ceil(totalItems / pageSize)` is exact for realistic catalogue sizes.
++
++**Other problems spotted (not fixed):**
++- `fetchAllProducts` uses `PAGESIZE = 50` and ignores `PAGE_SIZE_MAX`. This is harmless, but the page size is hard-coded.
++- `== None` comparisons should be `is None`.
++- `listing.py` has unused imports (`os`) and mixed camelCase naming.
++- `__main__.py` runs the export at import time, with no `main()` guard.
++- Pagination relies on a single `count_products()` call, so products added or removed mid-export could be skipped or duplicated.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..65b2bb9 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = math.ceil(totalItems / pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..23cf248 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,10 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++        self.assertEqual(getPageCount(0, 50), 0)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)
