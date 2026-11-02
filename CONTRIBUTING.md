@@ -61,6 +61,15 @@ The [pull request template](.github/PULL_REQUEST_TEMPLATE.md) asks for:
 - Real-run cost in USD, or none.
 - No secrets, `make scan` passed, run data redacted, docs updated, no unrelated changes.
 
+### Automatic checks on every pull request
+
+The `Pull request requirements` workflow runs `scripts/check_pr_requirements.py` and fails the pull request unless:
+
+- the description keeps the template's six sections in order, with none left empty and a `Closes` line, at least one type ticked, a dollar amount or `none` for the cost, and every checklist item ticked or marked not applicable;
+- the title, description, branch name and every commit message avoid the forbidden wording listed in the script;
+- the branch is named `type/short-topic`;
+- every commit uses a GitHub no-reply address for author and committer. Set it once with `git config user.email ID+USERNAME@users.noreply.github.com`; the number and name are on your GitHub email settings page. Never commit with a private address in a public repository.
+
 ## Conduct
 
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
