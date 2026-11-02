@@ -20,6 +20,10 @@ One JSON object per line:
 
 Subjects also carry `run_id`, `task_id` and `variant`, which lead to `runs/<run_id>/`.
 
+## incidents.jsonl
+
+The incident log (rendered to `docs/incidents.md`). `blackbox index` and `blackbox report` read it: every run listed in `affected.runs` of an incident with `invalidates_results: true` is marked `confounded_by` that incident in `runs/index.jsonl` and left out of the pass rates and means in `docs/results.md`, which lists it separately.
+
 ## builders/
 
 `builders/<name>/events.jsonl` holds the redacted, shortened event log of each builder agent, produced by:

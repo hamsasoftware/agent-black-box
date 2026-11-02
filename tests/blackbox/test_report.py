@@ -26,10 +26,13 @@ def test_index_and_report(tmp_path):
     assert rows[1]["behaviours"] == ["minimal-diff", "premature-stop"]
     assert main(["report", "--root", str(root)]) == 0
     md = (root / "docs" / "results.md").read_text()
-    assert "| t1 | bare | 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (2), premature-stop (1) |" in md
-    assert "| t1 | plumbed | 1 | 1/1 (100%) | 1.00 | n/a |" in md
+    assert "| t1 | bare | 2 of 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (2), premature-stop (1) |" in md
+    assert "| t1 | plumbed | 1 of 1 | 1/1 (100%) | 1.00 | n/a |" in md
+    assert rows[0]["claim_outcome"] == "unknown" and rows[0]["confounded_by"] == []
+    assert "## Confounded runs\n\nNone." in md
 
 
 def test_empty_report(tmp_path):
     assert main(["report", "--root", str(tmp_path)]) == 0
-    assert "Runs: 0." in (tmp_path / "docs" / "results.md").read_text()
+    md = (tmp_path / "docs" / "results.md").read_text()
+    assert "Runs: 0. Clean: 0. Confounded: 0." in md and "| none | | 0 of 0 |" in md
