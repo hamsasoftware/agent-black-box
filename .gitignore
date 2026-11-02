@@ -9,3 +9,7 @@ workspaces/
 *.egg-info/
 dist/
 .DS_Store
+
+# Local-only agent rules
+CLAUDE.local.md
+.claude/settings.local.json
