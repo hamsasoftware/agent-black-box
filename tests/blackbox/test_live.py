@@ -251,3 +251,18 @@ def test_clock_redraws_footer_on_a_tty():
     quiet.start_clock()
     quiet.stop_clock()
     assert quiet.out.getvalue() == ""
+
+
+def test_repeated_footer_draws_never_stack_on_a_tty():
+    out = io.StringIO()
+    view = LiveView(out=out, tty=True, color=False, width=100)
+    view.header({"agent_name": "A", "agent_id": "agt-1", "task_id": "t", "variant": "bare", "model": "m", "budget_usd": 1.0, "run_id": "r"})
+    out.seek(0, 2)
+    start = out.tell()
+    view._draw_footer()
+    view._draw_footer()
+    view._draw_footer()
+    drawn = out.getvalue()[start:]
+    assert drawn.count("\r\x1b[K") == 3
+    assert drawn.startswith("\r\x1b[K")
+    assert all(segment.startswith(" turns") for segment in drawn.split("\r\x1b[K") if segment)
