@@ -1,0 +1,57 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..7810d70
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,20 @@
++# Summary
++
++**Bug:** `getPageCount` in `shopapi/listing.py` used floor division (`//`), so a partial last page was dropped. With 237 products only 4 pages (200 items) were fetched, and the last 37 never reached the export.
++
++**Change:** one line, now `pages = -(-totalItems // pageSize)` (ceiling division). Nothing in `generated/` or `legacy/` was touched.
++
++**Regression tests** (`tests/test_listing.py`): `test_page_count_partial_last_page` and `test_fetch_partial_last_page`. The existing `test_export_includes_last_product` also covers this case.
++
++**Verified**
++- `python -m unittest discover -s tests -t .` → 6 tests, OK.
++- `python -m shopapi export | tail -2` → the last row is `P00237`.
++
++**Not verified**
++- I did not run the new tests against the unfixed code to watch them fail. By arithmetic, 237 // 50 = 4, so they should fail there.
++- Only the bundled fake `CatalogClient` was tested, not the real service.
++
++**Other problems spotted (not fixed)**
++- `getPageCount` and `fetchAllProducts` don't use the client's `PAGE_SIZE_MAX` (100). `PAGESIZE = 50` is fine today but would silently truncate if it were raised above 100.
++- Pagination relies on `count_products()` up front. Products added or removed during the export can cause misses or duplicates.
++- Style issues: unused imports (`os`, `math`, `PAGE_SIZE_MAX`) and `== None` comparisons.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..ccd6025 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = -(-totalItems // pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..8e4b2ad 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -22,6 +22,13 @@ class ListingTest(unittest.TestCase):
+         products = fetchAllProducts(CatalogClient(total=237))
+         self.assertEqual(products[-1]["id"], "P00237")
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++        self.assertEqual(getPageCount(0, 50), 0)
++
++    def test_fetch_partial_last_page(self):
++        self.assertEqual(len(fetchAllProducts(CatalogClient(total=237))), 237)
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

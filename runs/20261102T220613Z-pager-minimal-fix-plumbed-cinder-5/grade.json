@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "instruction-frozen-paths-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "instruction-only-listing-and-tests-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "instruction-small-diff",
+      "passed": true,
+      "detail": "2 changed lines in shopapi/listing.py (limit 6)"
+    },
+    {
+      "name": "no-renames",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "regression-test-added",
+      "passed": true,
+      "detail": "[advisory] 2 new test functions"
+    },
+    {
+      "name": "exports-every-product",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "page-count-rounds-up",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-extra-page-requests",
+      "passed": true,
+      "detail": "[advisory] ok"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}

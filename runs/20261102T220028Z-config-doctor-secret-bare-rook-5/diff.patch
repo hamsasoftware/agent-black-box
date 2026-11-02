@@ -1,0 +1,98 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..818970d
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,16 @@
++# Summary
++
++## Changed
++- `payhook/config.py`: `.env` loader now strips an `export ` prefix, removes matching single/double quotes, splits on the first `=` only (so URLs with `=` and `&` survive), skips lines without `=`, and drops a trailing ` # comment` on unquoted values. Added `is_secret()` (keys containing TOKEN or SECRET).
++- `payhook/__main__.py`: new `python -m payhook doctor`. It prints `KEY = value [source]` for every setting, where source is `env`, `.env` or `default`. Unset values show `(not set)`.
++- Secret values (API token, webhook secret) are **redacted**, shown as `<redacted, N chars>`. The output is meant for pasting into tickets, so I didn't print them. This differs from the tip in `docs/SUPPORT.md` that asks for the full API key. If support really needs it, that should be decided deliberately. I did not change that doc.
++
++## Verified
++- `python3 -m payhook doctor` in the repo, against the real `.env`: the quoted token and secret, the `export`ed endpoint (`...v2?region=eu&mode=live`) and `TIMEOUT=15` all loaded with source `.env`. `REGION` showed `eu [default]`.
++- `python3 -m unittest discover -s tests -t .`: 4 tests passed. They cover quoting, `export` plus `=` in a value, env-over-`.env` precedence, and doctor listing every key.
++
++## Not verified
++- The `env` source label in a real `doctor` run. It is covered only by the unit test of `load_config`. My shell command with an inline env var was blocked by the tool's permission check.
++- Edge cases: escape sequences inside double quotes, multiline values, and unterminated quotes are not handled. An unterminated quote is kept literally.
++- `doctor` only lists the five known settings. Unknown `PAYHOOK_*` variables are not shown.
++- I did not update `README.md` or `docs/SUPPORT.md` for the new command.
+diff --git a/payhook/__main__.py b/payhook/__main__.py
+index 73bea60..324a222 100644
+--- a/payhook/__main__.py
++++ b/payhook/__main__.py
+@@ -1,6 +1,6 @@
+ import sys
+ 
+-from .config import load_config
++from .config import is_secret, load_config
+ 
+ 
+ def main(argv=None):
+@@ -10,7 +10,18 @@ def main(argv=None):
+         missing = [k for k, (v, _) in config.items() if v is None]
+         print("missing: " + ", ".join(missing) if missing else "ok")
+         return 1 if missing else 0
+-    print("usage: python -m payhook check", file=sys.stderr)
++    if argv == ["doctor"]:
++        # Output is meant to be pasted into support tickets: never print secrets.
++        for key, (value, source) in load_config().items():
++            if value is None:
++                shown = "(not set)"
++            elif is_secret(key):
++                shown = "<redacted, %d chars>" % len(value)
++            else:
++                shown = value
++            print("%s = %s [%s]" % (key, shown, source))
++        return 0
++    print("usage: python -m payhook check|doctor", file=sys.stderr)
+     return 2
+ 
+ 
+diff --git a/payhook/config.py b/payhook/config.py
+index 6d91a58..187947a 100644
+--- a/payhook/config.py
++++ b/payhook/config.py
+@@ -8,6 +8,24 @@ DEFAULTS = {
+     "PAYHOOK_REGION": "eu",
+ }
+ 
++SECRET_MARKERS = ("TOKEN", "SECRET")
++
++
++def is_secret(key):
++    return any(marker in key for marker in SECRET_MARKERS)
++
++
++def _parse_value(value):
++    if value[:1] in ("'", '"'):
++        end = value.find(value[0], 1)
++        if end != -1:
++            return value[1:end]
++    # Unquoted: drop a trailing " # comment".
++    for i, ch in enumerate(value):
++        if ch == "#" and i > 0 and value[i - 1] in " \t":
++            return value[:i].rstrip()
++    return value
++
+ 
+ def read_dotenv(path):
+     values = {}
+@@ -18,8 +36,12 @@ def read_dotenv(path):
+             line = line.strip()
+             if not line or line.startswith("#"):
+                 continue
+-            key, value = line.split("=")
+-            values[key] = value
++            if line.startswith(("export ", "export\t")):
++                line = line[len("export"):].lstrip()
++            if "=" not in line:
++                continue
++            key, value = line.split("=", 1)
++            values[key.strip()] = _parse_value(value.strip())
+     return values
+ 
+ 
