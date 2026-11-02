@@ -17,10 +17,10 @@ python -m blackbox validate PATH...    # specific files or directories
 4. The confinement layers are prepared (see "Confinement").
 5. The agent CLI runs in print mode with `PROMPT.md` as the prompt, `--output-format stream-json --verbose`, the model, `--max-budget-usd`, `--max-turns` from `task.yaml`, a fresh `--session-id`, `--permission-mode acceptEdits`, `--setting-sources project,local`, `--strict-mcp-config`, `--settings` with the harness rules, and the allow list in `allowed_tools`. Both variants get exactly the same allow list, mode and harness rules; the only difference is the copied plumbing. Standard input is closed. A wall-clock timeout (`timeout_seconds`, or `--timeout`) kills the whole process group.
 6. The API key is read from the env file (`--env-file`, else `$BLACKBOX_ENV_FILE`, else `~/.config/devagent/env`) and placed only in the agent subprocess environment. That environment is built from scratch: `PATH`, locale and terminal variables, the key, a private `HOME`, `CLAUDE_CONFIG_DIR` inside it, `CLAUDE_PROJECT_DIR` set to the workspace, and `DISABLE_AUTOUPDATER=1`. Nothing else from the caller's shell is passed on. The grader and git never see the key.
-7. Every stdout line is kept as one event. Lines that are not JSON objects are kept as `{"type": "malformed", "raw": ...}`.
+7. Every stdout line is kept as one event. Lines that are not JSON objects are kept as `{"type": "malformed", "raw": ...}`. Each event is redacted and appended to `runs/<run_id>/events.jsonl` (flushed) the moment it arrives, so a run can be followed while it happens. While the agent works the run directory also holds `live.json`; it is removed once `run.json` is written, and set to `"status": "failed"` if the harness stops with an error.
 8. After the agent exits, `git add -A` and a diff against the baseline give `diff.patch` and `files_changed`.
 9. Only then is `grader/` copied next to (never inside) the workspace and run as `python grader/run.py <workspace>`.
-10. Behaviour detectors and claim extraction run on the in-memory, unredacted data. Everything is then passed through the redactor and written. The workspace is deleted unless `--keep-workspace` is given.
+10. Behaviour detectors and claim extraction run on the in-memory, unredacted data. The remaining files are then passed through the redactor and written. The workspace is deleted unless `--keep-workspace` is given.
 
 ## Confinement
 
@@ -37,6 +37,14 @@ The subject agent must stay inside its workspace. Four layers are applied, and `
 
 The CLI's bundled skills and built-in plugins (listed in the init event) are part of the product and load in every run, isolated or not.
 
+## Live view
+
+`blackbox run ... --live` renders the run in the terminal while it happens, and `blackbox watch <run dir, run id or a unique part of one>` renders a run from its directory: it follows a run in progress until `run.json` appears, or shows a finished one (`--no-follow` renders what is there and exits; `--replay N` replays a finished run at N times real speed using `t_ms`, capping each pause at 2 seconds; `--timeout S` stops following).
+
+The view shows a header (agent name, agent id, task, variant, model, run id, budget, turn cap), then one line per event: event index and seconds since launch, `>` for a tool call with a short summary (the command, a workspace-relative path with line counts, a pattern), `< ok` or `< error` for its result, `DENIED` for a permission denial and `BLOCKED by hook` for a hook block, `"` for assistant text on one line, `~ thinking`, `*` for system events (`thinking_tokens` updates are skipped) and `# agent finished` for the result. A footer shows turns against the cap, input, output and cache-read tokens, cost against the budget (known once the result event arrives), elapsed time and the number of blocked calls. The final summary shows the grade, failed checks, stop reason, cost, tagged behaviours (`+` good, `-` bad), claim counts and confinement layers.
+
+It uses ANSI codes only, with no extra dependencies. Lines are cut to the terminal width (120 columns when it cannot be read; minimum 60). On a terminal the footer stays on the last line and refreshes every second. Without a terminal, or with `NO_COLOR`, `TERM=dumb` or `--no-color`, there are no escape codes and the footer is printed once before the summary. Everything shown passes the redactor: `run --live` renders the already redacted events, and the view redacts every string again before printing.
+
 ## Run ids and names
 
 `run_id` is `<UTC start, YYYYMMDDTHHMMSSZ>-<task id>-<variant>-<lower-case name>`, for example `20261102T194422Z-off-by-one-bare-ember`. Subject names come from the roster in ARCHITECTURE.md in order, counted from the subject entries already in `ledger/agents.jsonl`; after the fifteenth run they repeat with a suffix (`Ember-2`). `agent_id` is `agt-` plus 8 random hex characters.
@@ -48,6 +56,7 @@ The CLI's bundled skills and built-in plugins (listed in the init event) are par
 | `run.json` | The record below. |
 | `events.jsonl` | One line per stream event: `{"i": index, "t_ms": milliseconds since launch, "event": the event as emitted}`. Evidence indexes in `run.json` point at `i`. |
 | `diff.patch` | `git diff` of the workspace against the baseline commit, untracked files included, ignored files excluded. |
+| `live.json` | Only while a run is in progress (or after the harness failed): `{run_id, agent_id, agent_name, task_id, variant, model, budget_usd, max_turns, started_at, status, confinement}` with `status` `running` or `failed`. Finished runs do not have it. |
 | `grade.json` | The grader's JSON. If the grader fails or prints nothing usable: `{"passed": false, "score": 0, "checks": [], "error": ...}`. |
 
 ## `run.json` fields

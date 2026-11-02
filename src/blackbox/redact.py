@@ -20,7 +20,7 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 EMAIL = re.compile(r"(?<![\w.+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
-HOME_PATHS = re.compile(r"(?:/home/[^/\s\"':]+|/Users/[^/\s\"':]+|/root)(?=[/\s\"':]|$)")
+HOME_PATHS = re.compile(r"(?<![\w.~-])(?:/home/[^/\s\"':]+|/Users/[^/\s\"':]+|/root)(?=[/\s\"':]|$)")
 MIN_ENV_VALUE_LEN = 8
 
 

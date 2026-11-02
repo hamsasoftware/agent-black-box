@@ -62,3 +62,8 @@ def test_scan(tmp_path):
     assert scan([str(clean / "c.txt")], strict=True)[0][2] == "email"
     (clean / "d.txt").write_text("value supersecretvalue\n")
     assert scan([str(clean / "d.txt")], extra_secrets=["supersecretvalue"])[0][2] == "env-value"
+
+
+def test_root_only_at_path_start():
+    r = Redactor()
+    assert r.text("/tmp/x/root/runs and /root/.ssh and /srv/home/a") == "/tmp/x/root/runs and ~/.ssh and /srv/home/a"

@@ -14,7 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -54,6 +54,7 @@ class RunOptions:
     taxonomy_path: Path | None = None
     sandbox: str = "auto"
     extra_env: dict[str, str] = field(default_factory=dict)
+    view: Any = None
 
 
 def utcnow() -> dt.datetime:
@@ -138,7 +139,8 @@ class AgentOutcome:
     error: str | None = None
 
 
-def run_agent(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float) -> AgentOutcome:
+def run_agent(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float,
+              on_event: Callable[[int, int, dict[str, Any]], None] | None = None) -> AgentOutcome:
     events: list[dict[str, Any]] = []
     offsets: list[int] = []
     start = time.monotonic()
@@ -153,8 +155,12 @@ def run_agent(cmd: list[str], cwd: Path, env: dict[str, str], timeout: float) ->
         assert proc.stdout is not None
         for line in proc.stdout:
             if line.strip():
-                events.append(parse_line(line.strip()))
-                offsets.append(int((time.monotonic() - start) * 1000))
+                event = parse_line(line.strip())
+                offset = int((time.monotonic() - start) * 1000)
+                events.append(event)
+                offsets.append(offset)
+                if on_event is not None:
+                    on_event(len(events) - 1, offset, event)
 
     def read_err() -> None:
         assert proc.stderr is not None
@@ -294,10 +300,34 @@ def run(opts: RunOptions) -> Path:
         else:
             inner = build_command(str(cli), prompt, opts, task, session_id, budget, conf.settings_path)
             cmd = conf.command(inner, ws, home, confine.read_only_paths(conf, cli))
-            outcome = run_agent(cmd, ws, env, timeout)
+            run_dir.mkdir(parents=True)
+            live_meta = {"run_id": run_id, "agent_id": agent_id, "agent_name": name, "task_id": task["id"],
+                         "variant": opts.variant, "model": opts.model, "budget_usd": budget,
+                         "max_turns": int(task["max_turns"]), "started_at": iso(started), "status": "running",
+                         "confinement": conf.record}
+            ledger.write_json(run_dir / "live.json", live_meta, redactor)
+            if opts.view is not None:
+                opts.view.header(redactor.obj(live_meta))
+                opts.view.line("confinement: " + ", ".join(conf.record["layers"]))
+            with (run_dir / "events.jsonl").open("w") as events_file:
+                def record_event(i: int, t_ms: int, event: dict[str, Any]) -> None:
+                    clean = redactor.obj(event)
+                    events_file.write(ledger.dumps({"i": i, "t_ms": t_ms, "event": clean}) + "\n")
+                    events_file.flush()
+                    if opts.view is not None:
+                        opts.view.event(i, t_ms, clean)
+                if opts.view is not None:
+                    opts.view.start_clock()
+                try:
+                    outcome = run_agent(cmd, ws, env, timeout, record_event)
+                finally:
+                    if opts.view is not None:
+                        opts.view.stop_clock()
         duration_ms = int((time.monotonic() - t0) * 1000)
         ended = utcnow()
         stream = Stream.from_events(outcome.events)
+        if opts.view is not None:
+            opts.view.line("agent stopped; diffing and grading")
         patch, files = collect_diff(ws, baseline)
         grade = run_grader(task_dir, ws, base)
         reason = stop_reason(outcome, stream)
@@ -360,13 +390,15 @@ def run(opts: RunOptions) -> Path:
             "event_count": len(outcome.events),
             "confinement": conf.record,
         }
-        events = [{"i": i, "t_ms": outcome.offsets_ms[i] if i < len(outcome.offsets_ms) else None, "event": e}
-                  for i, e in enumerate(outcome.events)]
-        run_dir.mkdir(parents=True)
-        ledger.write_jsonl(run_dir / "events.jsonl", events, redactor)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        if not (run_dir / "events.jsonl").exists():
+            (run_dir / "events.jsonl").write_text("")
         (run_dir / "diff.patch").write_text(redactor.text(patch))
         ledger.write_json(run_dir / "grade.json", grade, redactor)
         ledger.write_json(run_dir / "run.json", record, redactor)
+        (run_dir / "live.json").unlink(missing_ok=True)
+        if opts.view is not None:
+            opts.view.summary(redactor.obj(record), run_dir)
         ledger.append_agent(root, {
             "agent_id": agent_id, "name": name, "role": "subject", "kind": "subject", "model": opts.model,
             "started_at": iso(started), "ended_at": iso(ended), "duration_ms": duration_ms,
@@ -380,6 +412,16 @@ def run(opts: RunOptions) -> Path:
             "run_id": run_id, "task_id": task["id"], "variant": opts.variant,
         }, redactor)
         return run_dir
+    except BaseException:
+        live = run_dir / "live.json"
+        if live.is_file():
+            try:
+                meta = json.loads(live.read_text())
+                meta["status"] = "failed"
+                live.write_text(json.dumps(meta, indent=2) + "\n")
+            except (OSError, json.JSONDecodeError):
+                pass
+        raise
     finally:
         if not opts.keep_workspace:
             shutil.rmtree(base, ignore_errors=True)
