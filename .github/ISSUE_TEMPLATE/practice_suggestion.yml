@@ -1,0 +1,61 @@
+name: Practice suggestion
+description: Suggest a practice for the agent instruction file, permissions, hooks or subagents.
+title: "[practice]: "
+labels: ["practice", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every practice in this repository cites a dated source. Undated or unsourced suggestions will be closed.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Agent instruction file
+        - Memory
+        - Permissions
+        - Hooks
+        - Named subagents
+        - Evaluation
+        - Tracing and recording
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: practice
+    attributes:
+      label: The practice
+      description: State it as one concrete, checkable rule.
+    validations:
+      required: true
+  - type: input
+    id: source-url
+    attributes:
+      label: Source URL
+      placeholder: https://
+    validations:
+      required: true
+  - type: input
+    id: source-date
+    attributes:
+      label: Source date
+      description: Publication or last-updated date of the source, as YYYY-MM-DD.
+      placeholder: "2026-01-31"
+    validations:
+      required: true
+  - type: textarea
+    id: quote
+    attributes:
+      label: Supporting quote
+      description: The passage from the source that supports the practice.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected-effect
+    attributes:
+      label: Expected effect
+      description: Which behaviour it should change, and how a bare-versus-plumbed run could show it.
+    validations:
+      required: true

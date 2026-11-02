@@ -1,0 +1,38 @@
+* @hexrift
+
+/README.md @hexrift
+/ARCHITECTURE.md @hexrift
+/runs/ @hexrift
+/ledger/ @hexrift
+
+/docs/best-practices.md @hexrift
+/docs/sources.json @hexrift
+/docs/model-choice.md @hexrift
+
+/AGENTS.md @hexrift
+/CLAUDE.md @hexrift
+/.claude/ @hexrift
+/plumbing/ @hexrift
+/.github/ @hexrift
+/SECURITY.md @hexrift
+/CONTRIBUTING.md @hexrift
+/CODE_OF_CONDUCT.md @hexrift
+/CODEOWNERS @hexrift
+/.editorconfig @hexrift
+/Makefile @hexrift
+/docs/adr/ @hexrift
+/docs/README.md @hexrift
+/scripts/ @hexrift
+
+/src/blackbox/ @hexrift
+/tests/blackbox/ @hexrift
+/pyproject.toml @hexrift
+/schemas/ @hexrift
+/docs/ledger.md @hexrift
+
+/tasks/ @hexrift
+/behaviour/taxonomy.yaml @hexrift
+/tests/tasks/ @hexrift
+
+/video/ @hexrift
+/docs/video.md @hexrift
