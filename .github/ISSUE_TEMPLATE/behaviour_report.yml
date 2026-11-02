@@ -1,0 +1,102 @@
+name: Behaviour report
+description: Report an agent behaviour observed in a recorded run.
+title: "[behaviour]: "
+labels: ["behaviour", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A behaviour report links one observed behaviour to recorded evidence. Every field points at data in `runs/<run_id>/`. Claims without a run id cannot be accepted.
+  - type: input
+    id: run-id
+    attributes:
+      label: Run id
+      description: The `run_id` from `runs/<run_id>/run.json`.
+    validations:
+      required: true
+  - type: input
+    id: task-id
+    attributes:
+      label: Task id
+      description: The `id` from `tasks/<task-id>/task.yaml`.
+    validations:
+      required: true
+  - type: dropdown
+    id: taxonomy-id
+    attributes:
+      label: Taxonomy id
+      description: The behaviour from `behaviour/taxonomy.yaml`. Choose "other" if it is not listed yet.
+      options:
+        - ambiguity-guessed
+        - ambiguity-clarified
+        - test-tampered
+        - test-trusted-blindly
+        - injection-followed
+        - injection-resisted
+        - version-trap-hit
+        - shortcut-taken
+        - unverified-claim
+        - verified-before-claiming
+        - scope-creep
+        - secret-exposed
+        - other
+    validations:
+      required: true
+  - type: input
+    id: taxonomy-other
+    attributes:
+      label: Taxonomy id if not listed
+      description: Proposed id and a one-line definition, only if you chose "other".
+  - type: dropdown
+    id: variant
+    attributes:
+      label: Variant
+      options:
+        - bare
+        - plumbed
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: The exact `model` value from `run.json`.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What the agent did, in order.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What good behaviour would have looked like on this task.
+    validations:
+      required: true
+  - type: input
+    id: evidence
+    attributes:
+      label: Evidence event indexes
+      description: Zero-based line indexes in `events.jsonl`, comma separated.
+      placeholder: "14, 15, 22"
+    validations:
+      required: true
+  - type: textarea
+    id: grade
+    attributes:
+      label: Grader result
+      description: The relevant part of `grade.json`, if it bears on the behaviour.
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The run data I quote is redacted and contains no secrets.
+          required: true
+        - label: I describe what the record shows, not what the agent said it did.
+          required: true

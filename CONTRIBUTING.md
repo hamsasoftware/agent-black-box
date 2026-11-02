@@ -1,0 +1,62 @@
+# Contributing
+
+Thanks for helping. This project records what coding agents actually do, so the bar for a change is evidence: a test, a grader result or a dated source.
+
+## Quickstart
+
+You need Python 3.11 or newer, `git` and `make`.
+
+```sh
+git clone https://github.com/hexrift/agent-black-box.git
+cd agent-black-box
+make setup        # create .venv and install dev tools
+make test         # offline tests; never spends money
+make run-task TASK=<task-id> VARIANT=bare   # one real run; spends money
+```
+
+`make help` lists every command. `make run-task` needs an API key in an environment file that the harness names at runtime (see `docs/ledger.md`). The key is passed only to the agent subprocess and must never be committed.
+
+## Branches and commits
+
+- Branch from `main` as `type/short-topic`, for example `feat/version-trap-task`, `fix/redactor-bearer`, `docs/ledger-fields`. Types: `feat`, `fix`, `docs`, `test`, `chore`, `ci`.
+- Write commit subjects in the imperative, under 72 characters, for example `Add grader check for edited tests`. Explain why in the body when it is not obvious.
+- One logical change per pull request. Do not mix a new task with harness changes.
+- Stay inside the paths your change is about. The module table in [ARCHITECTURE.md](ARCHITECTURE.md) lists who owns what.
+
+## Test first
+
+Write the failing test before the fix or feature, then make it pass. `make test` must stay offline and free: tests never call a model or spend money. Real runs happen only when a maintainer starts them.
+
+## Adding a task
+
+1. Open a [task proposal](https://github.com/hexrift/agent-black-box/issues/new?template=task_proposal.yml) first: the trap, the failure mode it should provoke, and how a grader detects it.
+2. Create `tasks/<task-id>/` in the format described in [ARCHITECTURE.md](ARCHITECTURE.md#task-format): `task.yaml`, `PROMPT.md`, `fixture/`, `grader/`, `NOTES.md`.
+3. Show that a reference solution passes and that at least one cheating solution (edited tests, hard-coded output, skipped work) is rejected. Add both as tests in `tests/tasks/`.
+4. Graders run offline with the standard library or pytest only, and are never visible to the agent.
+5. Open the pull request with the task template: add `?template=task.md` to the compare URL.
+
+## Proposing a practice
+
+Practices for the agent instruction file, permissions, hooks and subagents must cite a source with a URL and a publication date. Open a [practice suggestion](https://github.com/hexrift/agent-black-box/issues/new?template=practice_suggestion.yml) with the source, its date, a supporting quote and the behaviour you expect it to change. A practice is adopted only when a bare-versus-plumbed comparison supports it, or when it is recorded as unproven.
+
+## Run data
+
+Anything under `runs/` comes from a real agent session and may contain secrets the agent saw.
+
+- Run data is redacted by the harness before it is written to the repository. Never hand-edit or commit raw transcripts.
+- Run `make scan` before every commit that touches run data. It must report no findings.
+- If you find a secret in committed data, do not open a public issue. Follow [SECURITY.md](SECURITY.md).
+
+## Pull request checklist
+
+The [pull request template](.github/PULL_REQUEST_TEMPLATE.md) asks for:
+
+- Purpose and the linked issue (`Closes #n`).
+- Evidence: run ids and grader results for any claim about behaviour.
+- Tests run and their results.
+- Real-run cost in USD, or none.
+- No secrets, `make scan` passed, run data redacted, docs updated, no unrelated changes.
+
+## Conduct
+
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).

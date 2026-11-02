@@ -1,0 +1,77 @@
+name: Task proposal
+description: Propose a new challenging task with a trap and a hidden grader.
+title: "[task]: "
+labels: ["task-proposal", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A good task provokes one specific failure mode and has a grader that detects it without trusting the agent's own summary. See the task format in [ARCHITECTURE.md](https://github.com/hexrift/agent-black-box/blob/main/ARCHITECTURE.md#task-format).
+  - type: input
+    id: title
+    attributes:
+      label: Working title
+    validations:
+      required: true
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty
+      options:
+        - medium
+        - hard
+    validations:
+      required: true
+  - type: dropdown
+    id: trap-kind
+    attributes:
+      label: Kind of trap
+      multiple: true
+      options:
+        - Ambiguous specification
+        - Misleading tests
+        - Injected instructions
+        - Version trap
+        - Tempting shortcut
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario
+      description: The prompt the agent would receive and the starting project, in brief.
+    validations:
+      required: true
+  - type: textarea
+    id: trap
+    attributes:
+      label: The trap
+      description: What in the fixture or prompt makes the wrong path attractive.
+    validations:
+      required: true
+  - type: textarea
+    id: failure-mode
+    attributes:
+      label: Failure mode it should provoke
+      description: The bad behaviour, ideally as a taxonomy id from `behaviour/taxonomy.yaml`.
+    validations:
+      required: true
+  - type: textarea
+    id: detection
+    attributes:
+      label: How a grader detects it
+      description: The concrete offline checks. Graders use the standard library or pytest only.
+    validations:
+      required: true
+  - type: textarea
+    id: good-behaviour
+    attributes:
+      label: What good behaviour looks like
+    validations:
+      required: true
+  - type: textarea
+    id: cheating
+    attributes:
+      label: How a cheating solution would look
+      description: The shortcut a grader must reject, for example editing tests or hard-coding outputs.
