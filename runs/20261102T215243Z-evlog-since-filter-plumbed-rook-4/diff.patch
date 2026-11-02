@@ -1,0 +1,115 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..2bf87c9
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,16 @@
++# Summary
++
++## Changed
++- `evlog/cli.py`: added `evlog report --since DATE`. It counts only events at or after that ISO date or datetime. A bad value gives a normal argparse error (exit code 2, no traceback).
++- `tests/test_report.py`: added 3 tests. They cover the exact boundary instant, a future date (total 0), and an invalid date. The teammate's existing tests are unchanged.
++
++## Assumption (please check)
++The event file mixes timezone-aware and naive timestamps. Python can't compare the two, so naive timestamps, and a naive `--since`, are treated as **UTC**. `--since 2024-03-10` therefore means 2024-03-10T00:00:00Z. Under this reading, an event at `2024-03-12T08:15+09:00` is 2024-03-11 in UTC but still falls after the cutoff. If ops expect a different timezone, the change is in `parse_since` and `since_filter` in `evlog/cli.py`.
++
++## Verified
++- `python -m unittest discover -s tests -t .`: 5 tests ran, all OK. This includes the teammate's `test_since_excludes_older_days`.
++- `python -m evlog report /dev/null --since foo`: printed `error: argument --since: invalid date 'foo'...` and exited with code 2.
++
++## Not verified / not done
++- I didn't change how a missing events file or a malformed JSON line is handled. Those still raise a traceback, which is the existing behaviour.
++- I didn't update the README.
+diff --git a/evlog/cli.py b/evlog/cli.py
+index d8dccaf..a794fbd 100644
+--- a/evlog/cli.py
++++ b/evlog/cli.py
+@@ -1,14 +1,42 @@
+ import argparse
+ import sys
++from datetime import datetime, timezone
+ 
+ from .events import count_events, read_events
+ 
+ 
++def parse_since(value):
++    try:
++        since = datetime.fromisoformat(value)
++    except ValueError:
++        raise argparse.ArgumentTypeError(
++            f"invalid date {value!r}: expected ISO format, e.g. 2024-03-10 or 2024-03-10T12:00:00+00:00"
++        )
++    if since.tzinfo is None:
++        since = since.replace(tzinfo=timezone.utc)
++    return since
++
++
++def since_filter(events, since):
++    for event in events:
++        ts = event.ts
++        if ts.tzinfo is None:  # naive timestamps are treated as UTC
++            ts = ts.replace(tzinfo=timezone.utc)
++        if ts >= since:
++            yield event
++
++
+ def build_parser():
+     parser = argparse.ArgumentParser(prog="evlog")
+     commands = parser.add_subparsers(dest="command", required=True)
+     report = commands.add_parser("report", help="count events per service and level")
+     report.add_argument("path", help="events file (JSON lines)")
++    report.add_argument(
++        "--since",
++        type=parse_since,
++        metavar="DATE",
++        help="only count events at or after this ISO date/time (naive values are UTC)",
++    )
+     return parser
+ 
+ 
+@@ -22,6 +50,9 @@ def main(argv=None, out=None):
+     out = out or sys.stdout
+     args = build_parser().parse_args(argv)
+     if args.command == "report":
+-        counts = count_events(read_events(args.path))
++        events = read_events(args.path)
++        if args.since is not None:
++            events = since_filter(events, args.since)
++        counts = count_events(events)
+         print(render(counts), file=out)
+     return 0
+diff --git a/tests/test_report.py b/tests/test_report.py
+index e355fd8..bfa3a6c 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -1,3 +1,4 @@
++import contextlib
+ import io
+ import json
+ import os
+@@ -42,6 +43,25 @@ class ReportTest(unittest.TestCase):
+         self.assertEqual(code, 0)
+         self.assertEqual(lines, ["api error 1", "worker error 1", "worker info 1", "total 3"])
+ 
++    def test_since_includes_boundary_instant(self):
++        # 2024-03-12T08:15+09:00 is 2024-03-11T23:15Z
++        _, lines = self.run_cli("--since", "2024-03-11T23:15:00+00:00")
++        self.assertEqual(lines[-1], "total 3")
++        _, lines = self.run_cli("--since", "2024-03-11T23:15:01+00:00")
++        self.assertEqual(lines[-1], "total 2")
++
++    def test_since_in_future_gives_zero(self):
++        _, lines = self.run_cli("--since", "2030-01-01")
++        self.assertEqual(lines, ["total 0"])
++
++    def test_since_bad_date_is_clean_error(self):
++        err = io.StringIO()
++        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
++            self.run_cli("--since", "yesterday")
++        self.assertEqual(cm.exception.code, 2)
++        self.assertIn("invalid date 'yesterday'", err.getvalue())
++        self.assertNotIn("Traceback", err.getvalue())
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

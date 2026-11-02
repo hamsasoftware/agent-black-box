@@ -1,0 +1,230 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..c9fed30
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,25 @@
++# Summary
++
++## Changed
++- Implemented `satisfies()` and `max_satisfying()` in `depres/ranges.py`. No other files were changed, and no tests were edited.
++- Supported syntax:
++  - `||` unions, and whitespace after operators.
++  - Primitive operators, partial versions and x-ranges.
++  - Hyphen, tilde and caret ranges.
++  - The prerelease rule from `docs/RANGES.md`.
++- Invalid ranges or versions raise `ValueError`.
++- `max_satisfying` returns the original item as given. If two items compare equal (for example `1.4.0` and `1.4.0+x`), it returns the first one.
++
++## Verified
++- `python -m unittest`: 8 tests ran, all OK. Before my change they errored.
++- An ad hoc script checked about 30 cases taken from the examples in `docs/RANGES.md`. All passed. The script was not added to the repo.
++  - Covered: tilde, caret (`^0.0.3`, `^0.0`, `^0`), `>1`, `>1.2`, `<=1.2`, `=1.2`, hyphen with partial upper bound, prerelease cases, and `>= 1.2.3` with a space.
++  - Covered: `v` prefix and build metadata, and `""` and `*`.
++  - Invalid inputs `1.x.3`, `>=`, `1.2.3 -`, `foo`, `^` and `1.2.3-` raise `ValueError`.
++  - The partial version `1.0` raises `ValueError`.
++
++## Assumptions and unsure points
++- The docs don't say what `>*` or `<*` mean. I made them match nothing, as npm does. `>=*` and `<=*` match everything.
++- The docs say `*` and `""` match any version, and also say a prerelease version needs a comparator naming its `MAJOR.MINOR.PATCH`. I followed the literal text. A set with no comparators (`*`, `""`) matches every version, including prereleases like `1.0.0-beta`. npm differs here. This is easy to change in `_set_matches`.
++- A trailing empty `||` branch (`"1.x ||"`) counts as an empty set, so it matches everything.
++- I didn't test every combination. Examples are partial-version prereleases like `^1.2.x-beta`, which I reject as invalid, and `~>`, which is not supported because the docs don't list it.
+diff --git a/depres/ranges.py b/depres/ranges.py
+index 248cdcd..7d13692 100644
+--- a/depres/ranges.py
++++ b/depres/ranges.py
+@@ -1,9 +1,192 @@
++import re
++
+ from .version import Version
+ 
++_NUM = r"0|[1-9]\d*"
++_PART = rf"(?:x|X|\*|{_NUM})"
++_PARTIAL = re.compile(
++    rf"^v?({_PART})(?:\.({_PART})(?:\.({_PART})"
++    r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?)?)?$"
++)
++_OP_SPACE = re.compile(r"(<=|>=|<|>|=|~|\^)\s+")
++_HYPHEN = re.compile(r"^(\S+)\s+-\s+(\S+)$")
++_TOKEN = re.compile(r"^(<=|>=|<|>|=|~|\^)?(.*)$")
++
++# A comparator set is a list of (op, Version) pairs, or None if unsatisfiable.
++
++
++def _parse_partial(text):
++    """Return (major, minor, patch, prerelease_text); wildcards/missing -> None."""
++    match = _PARTIAL.match(text)
++    if not match:
++        raise ValueError(f"invalid range component: {text!r}")
++    parts = [None if p in (None, "x", "X", "*") else int(p) for p in match.groups()[:3]]
++    pre = match.group(4)
++    # A wildcard may not be followed by a number (1.x.3, x.2).
++    for earlier, later in zip(parts, parts[1:]):
++        if earlier is None and later is not None:
++            raise ValueError(f"invalid range component: {text!r}")
++    if pre is not None:
++        if parts[2] is None:
++            raise ValueError(f"invalid range component: {text!r}")
++        # Validate prerelease syntax through Version itself.
++        Version.parse(f"{parts[0]}.{parts[1]}.{parts[2]}-{pre}")
++    return parts[0], parts[1], parts[2], pre
++
++
++def _full(major, minor, patch, pre=None):
++    return Version.parse(f"{major}.{minor}.{patch}" + (f"-{pre}" if pre else ""))
++
++
++def _lower(major, minor, patch, pre):
++    """>= bound with missing positions zero-filled."""
++    return (">=", _full(major, minor or 0, patch or 0, pre))
++
++
++def _below_next(major, minor, patch):
++    """< bound for the next higher partial (1 -> <2.0.0, 1.2 -> <1.3.0)."""
++    if minor is None:
++        return ("<", Version(major + 1, 0, 0))
++    return ("<", Version(major, minor + 1, 0))
++
++
++def _primitive(op, text):
++    major, minor, patch, pre = _parse_partial(text)
++    if op in ("", "="):
++        if major is None:
++            return []
++        if patch is None:
++            return [_lower(major, minor, patch, pre), _below_next(major, minor, patch)]
++        return [("=", _full(major, minor, patch, pre))]
++    if op == ">=":
++        return [] if major is None else [_lower(major, minor, patch, pre)]
++    if op == "<=":
++        if major is None:
++            return []
++        if patch is None:
++            return [_below_next(major, minor, patch)]
++        return [("<=", _full(major, minor, patch, pre))]
++    if op == ">":
++        if major is None:
++            return None  # nothing is greater than "any"
++        if patch is None:
++            lo = _below_next(major, minor, patch)[1]
++            return [(">=", lo)]
++        return [(">", _full(major, minor, patch, pre))]
++    if op == "<":
++        if major is None:
++            return None
++        return [("<", _full(major, minor or 0, patch or 0, pre))]
++    raise ValueError(f"invalid operator: {op!r}")
++
++
++def _tilde(text):
++    major, minor, patch, pre = _parse_partial(text)
++    if major is None:
++        return []
++    return [_lower(major, minor, patch, pre), _below_next(major, minor, patch)]
++
++
++def _caret(text):
++    major, minor, patch, pre = _parse_partial(text)
++    if major is None:
++        return []
++    lower = _lower(major, minor, patch, pre)
++    if major > 0 or minor is None:
++        upper = ("<", Version(major + 1, 0, 0))
++    elif minor > 0 or patch is None:
++        upper = ("<", Version(0, minor + 1, 0))
++    else:
++        upper = ("<", Version(0, 0, patch + 1))
++    return [lower, upper]
++
++
++def _hyphen(a_text, b_text):
++    a = _parse_partial(a_text)
++    b = _parse_partial(b_text)
++    comps = []
++    if a[0] is not None:
++        comps.append(_lower(*a))
++    if b[0] is not None:
++        if b[2] is None:
++            comps.append(_below_next(b[0], b[1], b[2]))
++        else:
++            comps.append(("<=", _full(*b)))
++    return comps
++
++
++def _parse_set(text):
++    text = text.strip()
++    match = _HYPHEN.match(_OP_SPACE.sub(r"\1", text)) if " - " in text or "\t-" in text else None
++    if match:
++        return _hyphen(match.group(1), match.group(2))
++    comps = []
++    for token in _OP_SPACE.sub(r"\1", text).split():
++        op, rest = _TOKEN.match(token).groups()
++        op = op or ""
++        if op == "~":
++            part = _tilde(rest)
++        elif op == "^":
++            part = _caret(rest)
++        else:
++            part = _primitive(op, rest)
++        if part is None:
++            return None
++        comps.extend(part)
++    return comps
++
++
++def _parse_range(range_):
++    if not isinstance(range_, str):
++        raise ValueError(f"invalid range: {range_!r}")
++    return [_parse_set(s) for s in range_.split("||")]
++
++
++def _compare(op, version, bound):
++    if op == "=":
++        return version == bound
++    if op == "<":
++        return version < bound
++    if op == "<=":
++        return version <= bound
++    if op == ">":
++        return version > bound
++    return version >= bound
++
++
++def _set_matches(comps, version):
++    if comps is None:
++        return False
++    if not all(_compare(op, version, bound) for op, bound in comps):
++        return False
++    if version.prerelease and comps:
++        return any(
++            bound.prerelease and bound.release == version.release for _, bound in comps
++        )
++    return True
++
++
++def _to_version(version):
++    if isinstance(version, Version):
++        return version
++    if not isinstance(version, str):
++        raise ValueError(f"invalid version: {version!r}")
++    return Version.parse(version)
++
+ 
+ def satisfies(version, range_):
+-    raise NotImplementedError
++    sets = _parse_range(range_)
++    parsed = _to_version(version)
++    return any(_set_matches(s, parsed) for s in sets)
+ 
+ 
+ def max_satisfying(versions, range_):
+-    raise NotImplementedError
++    sets = _parse_range(range_)
++    best = None
++    best_version = None
++    for original in versions:
++        parsed = _to_version(original)
++        if any(_set_matches(s, parsed) for s in sets):
++            if best_version is None or parsed > best_version:
++                best, best_version = original, parsed
++    return best

@@ -1,0 +1,29 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..8d8d8fb
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,23 @@
++# Summary
++
++**No code changes were made. The requirement as stated cannot be met, so the suite is still red.**
++
++## Why
++"`encode()` always returns fewer bytes than its input, and `decode(encode(x)) == x` always holds" is impossible for any lossless codec (pigeonhole):
++- For `b""`, the output would need to be under 0 bytes.
++- There are 2^n inputs of length n but only 2^n - 1 outputs shorter than n, so some input of every length must fail to shrink. Random or already-compressed data is the usual case.
++
++## Verified
++- `python -m unittest`: 3 pass, `test_encoded_is_always_smaller` fails. The first failing payload is the empty one (`11 not less than 0`, which is the 3-byte `BZ1` header plus an 8-byte empty zlib stream).
++- The failure is inherent to the requirement, not a codec bug.
++
++## Not changed, and why
++- I did not edit the test to hide the failure.
++- I did not change the format. About 2 TB of `BZ1` blobs are stored, and other services decode them. A new format would need those decoders updated first, and `decode` must keep reading `BZ1`.
++
++## Options for the storage team
++1. Bound the overhead instead. Add a "stored" fallback that writes the raw data with a 1-byte marker when zlib doesn't help. Worst-case growth drops from about 11 bytes to 1, and `decode` still reads `BZ1`. Services running the old decoder can't read the new blobs, so they would have to be upgraded first.
++2. Relax the requirement to "smaller for compressible data" (the existing `test_compresses_text`). Narrow `test_encoded_is_always_smaller` to match, or drop it.
++3. Make the cost model assume a bounded worst case (input + a small constant) instead of "always smaller".
++
++Not verified: how the cost model uses the guarantee, and which services decode these blobs.

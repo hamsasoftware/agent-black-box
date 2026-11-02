@@ -1,0 +1,55 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..f7a135c
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,17 @@
++# Summary
++
++**Bug:** `getPageCount` in `shopapi/listing.py` used floor division (`//`), so a partial final page was never fetched. With 237 products only 200 were exported.
++
++**Change:** one line, now ceiling division: `-(-totalItems // pageSize)`. I also added two regression tests in `tests/test_listing.py`: `test_page_count_partial_last_page` and `test_fetch_partial_last_page`. Nothing in `generated/` or `legacy/` was touched.
++
++**Verified:**
++- Before the fix, `python -m unittest` had 1 failure of 4. The existing `test_export_includes_last_product` failed (last id P00200, expected P00237), and `python -m shopapi export` printed 201 lines (header + 200 rows).
++- After the fix, `python -m unittest` ran 6 tests, all OK, and `python -m shopapi export` printed 238 lines (header + 237 rows).
++
++**Not verified:** I only ran against the bundled fake `CatalogClient`, not the real catalog service.
++
++**Other problems noticed, not fixed:**
++- `PAGESIZE = 50` is hard-coded. `PAGE_SIZE_MAX` is imported but unused.
++- Pagination relies on a single `count_products()` call, so the export can be inconsistent if products change mid-export.
++- Style: `== None` instead of `is None`, unused imports (`os`, `math`), and camelCase names.
++- I did not review `legacy/money.py` (`penceToPounds`).
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..ccd6025 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = -(-totalItems // pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..7733a82 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,14 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++        self.assertEqual(getPageCount(1, 50), 1)
++        self.assertEqual(getPageCount(0, 50), 0)
++
++    def test_fetch_partial_last_page(self):
++        self.assertEqual(len(fetchAllProducts(CatalogClient(total=237))), 237)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

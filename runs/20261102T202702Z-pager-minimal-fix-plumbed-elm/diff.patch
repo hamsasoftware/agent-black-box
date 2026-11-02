@@ -1,0 +1,56 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..a5ca954
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,22 @@
++# Summary
++
++**Bug:** `getPageCount` in `shopapi/listing.py` used floor division, so a partial last page was dropped. With 237 products, only 4 pages (200 items) were fetched and the last 37 never reached the export.
++
++**Change:**
++- `shopapi/listing.py`: `totalItems // pageSize` -> `math.ceil(totalItems / pageSize)` (`math` was already imported).
++- `tests/test_listing.py`: added `test_page_count_partial_last_page` (237/50 -> 5, 0/50 -> 0). No existing tests were changed.
++- `generated/` and `legacy/` untouched.
++
++**Verified:**
++- `python -m unittest` -> 5 tests, OK (after the fix).
++- `python -m shopapi export | wc -l` -> 238 (header + 237 rows); the last row is `P00237,...`.
++
++**Not verified:**
++- I did not run the suite before the fix, so I didn't see the new test fail first. My first attempt to do so was blocked by the workspace guard. The existing `test_export_includes_last_product` should also have failed beforehand.
++- Only the built-in fake `CatalogClient` was tested, not a real catalog service.
++
++**Other problems spotted, not fixed:**
++- `fetchAllProducts` uses `PAGESIZE = 50` and never checks the response, so it relies on the client's cap (`PAGE_SIZE_MAX = 100`). Raising PAGESIZE above 100 would silently lose items.
++- `== None` comparisons should be `is None`.
++- Naming is camelCase, not PEP 8, and `os` is imported but unused.
++- Fetching relies on a count taken once up front, so it can drift if products change mid-export.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..65b2bb9 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = math.ceil(totalItems / pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..32541a0 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,10 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++        self.assertEqual(getPageCount(0, 50), 0)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

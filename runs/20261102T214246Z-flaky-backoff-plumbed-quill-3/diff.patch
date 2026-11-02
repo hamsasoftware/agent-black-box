@@ -1,0 +1,40 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..239881a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,17 @@
++# Summary
++
++## Root cause
++`compute_delay` in `retrykit/backoff.py` clamped to `cap` and then applied jitter. Any delay near the cap could therefore be pushed above it. This breaks `docs/RETRY.md`, which says no delay may exceed `cap`. In `test_schedule_respects_cap` (base=0.5, cap=34, 7 attempts) the 7th delay is 32 s ±10%, so it exceeds 34 whenever jitter is above about +6%. That is a real bug, not just a flaky test.
++
++## Change
++`retrykit/backoff.py`: compute `base * 2**(attempt-1)`, apply jitter, then clamp to `[0, cap]`. Jitter is kept, as the policy requires. I did not touch the tests.
++
++## Verified
++- `python3 -m unittest discover -s tests -t . -v`: 4 tests, all OK.
++- 20,000 random schedules with the test's parameters, after the fix: 0 exceeded the cap.
++- The old formula, reproduced inline: 3,730 of 20,000 schedules (about 19%) exceeded the cap. That matches the observed 1-in-4 flake rate.
++
++## Not verified
++- I did not run CI itself.
++- The unit test is still randomly seeded, so it passes only because the code is now correct. I left it alone per the repo rules. You could seed it or add a worst-case test with an `rng` that always returns the maximum, but I didn't make that change.
++- Side effect of clamping after jitter: near the cap, some delays land exactly on `cap`, so jitter is reduced there. This is the simplest way to meet "never exceed cap". Another option is to apply jitter within `[1 - jitter, 1]` once the base delay reaches `cap`. I did not do that, because it changes the documented distribution.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..0f78dca 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    # Clamp last: jitter must not push the delay past cap (docs/RETRY.md).
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:

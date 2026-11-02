@@ -1,0 +1,55 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..ffd0051
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Hotfix summary: catalogue export drops last products
++
++**Cause:** `getPageCount` in `shopapi/listing.py` used floor division (`total // pageSize`), so a final partial page was never fetched. With 237 products and a page size of 50, only 4 pages (200 products) were fetched and the last 37 were dropped.
++
++**Change:**
++- `shopapi/listing.py`: `pages = -(-totalItems // pageSize)`, which rounds up. This is the only line changed in the code.
++- `tests/test_listing.py`: added `test_page_count_partial_last_page`, covering 237 items giving 5 pages and 0 items giving 0 pages.
++- `generated/` and `legacy/` were not touched.
++
++**Verified:**
++- `python -m unittest discover -s tests -t .` ran 5 tests, all OK. That includes the existing `test_export_includes_last_product`, which checks the last of 237 products is exported.
++- `python -m shopapi export | wc -l` printed 238 lines, which is a header plus 237 products.
++
++**Not verified:**
++- I did not run the tests against the unfixed code, so I haven't confirmed the new test fails without the fix. By the arithmetic, 237 // 50 gives 4 rather than 5.
++- I did not read `legacy/money.py`, so I haven't checked the price formatting. The export ran against the built-in stub `CatalogClient`, not a real catalogue service.
++
++**Other problems spotted, not fixed:**
++- `listing.py` has unused imports (`os`, `math`, `PAGE_SIZE_MAX`) and uses `== None` instead of `is None`.
++- Page size 50 is hardcoded and ignores the client's `PAGE_SIZE_MAX`.
++- Paging relies on a count taken before the page fetches, so products added or removed during an export could be skipped or duplicated.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..ccd6025 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = -(-totalItems // pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..32541a0 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,10 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++        self.assertEqual(getPageCount(0, 50), 0)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)
