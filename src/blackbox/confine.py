@@ -57,7 +57,7 @@ def prepare(base: Path, workspace: Path, home: Path, protected: list[Path], mode
     config.mkdir(parents=True, exist_ok=True)
     guard_path = base / "guard.py"
     shutil.copyfile(guard.__file__, guard_path)
-    hook = f"{shlex.quote(sys.executable)} {shlex.quote(str(guard_path))} {shlex.quote(str(workspace))}"
+    hook = " ".join(shlex.quote(str(x)) for x in [sys.executable, guard_path, workspace, *protected])
     rules = deny_rules(workspace, protected)
     settings = {
         "permissions": {"deny": rules},

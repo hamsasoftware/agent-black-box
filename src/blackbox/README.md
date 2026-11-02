@@ -8,6 +8,7 @@ The harness: runs one task headlessly with the agent CLI, records a redacted led
 python -m blackbox run TASK_DIR|--task ID --variant bare|plumbed --model ID [--budget-usd N] [--plumbing-dir DIR] [--sandbox auto|required|off]
 python -m blackbox run ... --live                # same, with a live terminal view
 python -m blackbox watch RUN [--no-follow] [--replay N]   # follow or replay a run
+python -m blackbox reanalyse [--runs DIR] [--dry-run]   # re-run detectors over recorded runs
 python -m blackbox scan PATH...                 # exit 1 on a secret
 python -m blackbox ingest-transcript FILE --name NAME --role ROLE
 python -m blackbox index                        # runs/index.jsonl
@@ -26,7 +27,7 @@ The `blackbox` console script is the same entry point.
 | `envfile.py` | Finds the env file and builds the agent's minimal environment; the key goes nowhere else. |
 | `confine.py` | Prepares the confinement layers: private home and config, deny rules, guard hook, sandbox choice. |
 | `sandbox.py` | Builds the bubblewrap command line and probes whether bubblewrap works here. |
-| `guard.py` | Standalone hook script and shared logic that spot paths outside the workspace. |
+| `guard.py` | Standalone hook script and shared logic that tell real escapes from scratch files and text that merely contains a slash. |
 | `stream.py` | Parses stream-json lines into tool uses, tool results, texts, usage, cost and denials. |
 | `behaviours.py` | Detector registry; each detector returns evidence as event indexes and a reason. |
 | `taxonomy.py` | Reads `behaviour/taxonomy.yaml`, with the agreed ids as a fallback. |
@@ -34,6 +35,7 @@ The `blackbox` console script is the same entry point.
 | `redact.py` | Redactor and secret scanner. |
 | `ledger.py` | Roster names, agent ids, JSON and JSONL writers (always through the redactor). |
 | `transcript.py` | Builder transcript ingestion into `ledger/builders/`. |
+| `reanalyse.py` | Re-runs detectors and claim checks over recorded runs and rewrites those fields in place. |
 | `report.py` | `runs/index.jsonl` and `docs/results.md`. |
 | `live.py` | Terminal live view (ANSI only) for `run --live` and `watch`. |
 | `schema.py` | Small JSON Schema validator for the ledger schema. |

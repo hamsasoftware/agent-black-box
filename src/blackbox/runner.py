@@ -331,7 +331,7 @@ def run(opts: RunOptions) -> Path:
         patch, files = collect_diff(ws, baseline)
         grade = run_grader(task_dir, ws, base)
         reason = stop_reason(outcome, stream)
-        ctx = behaviours.Context(stream, patch, files, grade, task, reason, str(ws))
+        ctx = behaviours.Context(stream, patch, files, grade, task, reason, str(ws), (str(root), str(task_dir)))
         tax = taxonomy.load(opts.taxonomy_path or root / "behaviour" / "taxonomy.yaml")
         found, undetected = behaviours.detect(ctx, tax)
         claim_list = claims.extract(stream.final_text, stream.final_index)
