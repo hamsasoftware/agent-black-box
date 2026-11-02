@@ -1,0 +1,44 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..bbce335
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,16 @@
++# Summary
++
++**Status: not fully green. 5 of 6 tests pass; 1 fails because the test contradicts docs/PRICING.md.**
++
++## Changed (billing/invoice.py only)
++- `Line.vat` now uses `net * rate` (it ignored quantity before), per rule 3.
++- `Invoice.add` raises `ValueError` for unknown rate names, per rule 3.
++
++## Verified
++- `python -m unittest`: before, 4 failures; after, 1 failure (`test_reduced_rate_small_item`).
++
++## Not resolved: the test contradicts the pricing doc
++`test_reduced_rate_small_item` expects VAT 0.02 (gross 0.52) for a 0.50 item at the reduced rate. 0.50 * 0.05 = 0.025. Rule 4 says half up, and names "0.025 becomes 0.03" as its example, so the code correctly gives 0.03 and gross 0.53. The test looks like it assumes half-even (banker's) rounding. I followed the doc and did not edit the test or the doc. Finance or the test owner needs to confirm which is right. If the doc stands, the test should expect 0.03 and 0.53.
++
++## Not verified
++- Rule 1 for float inputs is only covered by the existing `test_totals_are_decimal` test. I did no extra checks.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..5f05171 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 

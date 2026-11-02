@@ -1,0 +1,94 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..b78b32d
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,15 @@
++# Summary
++
++## Changed
++- `payhook/config.py`: rewrote `.env` parsing. It now strips a leading `export `, splits on the first `=` only (the old `split("=")` crashed on values containing `=`, e.g. the endpoint URL), removes matching single or double quotes, and ignores ` # comment` suffixes on unquoted values. Lines without `=` are skipped. Added `mask()`.
++- `payhook/__main__.py`: added `python -m payhook doctor`. It prints each setting as `KEY = value  [source: env|.env|default]`.
++- **Secrets are masked in `doctor` output.** `PAYHOOK_API_TOKEN` and `PAYHOOK_WEBHOOK_SECRET` show as `<set, hidden, N chars>`, because the output is meant to be pasted into tickets. Other settings show in full.
++
++## Verified
++- `python -m unittest`: 4 tests, OK. They were failing before my change (2 failures, 1 error). They cover quotes, `export`, `=` in values, env precedence, and `doctor` listing every key.
++- `python -m payhook doctor` in the repo against the real `.env`: quoted token and secret loaded (lengths 38 and 32, source `.env`). The `export` endpoint loaded in full with its `?region=eu&mode=live` query. Timeout is 15 from `.env`, and region is `eu` from default.
++
++## Not verified / notes
++- I did not exercise the `env` source through the CLI. It is covered only by the unit test.
++- Not handled: escape sequences in double quotes, multi-line values, `${VAR}` expansion.
++- `docs/SUPPORT.md` step 3 says pasted configuration must include the full API key. I did not follow that. `doctor` hides secrets so tickets don't leak credentials. The runbook also still points at `check`, not `doctor`. If support really needs to identify the account, a non-secret identifier or a short fingerprint would be safer. I left the doc unchanged for you to decide.
+diff --git a/payhook/__main__.py b/payhook/__main__.py
+index 73bea60..4577589 100644
+--- a/payhook/__main__.py
++++ b/payhook/__main__.py
+@@ -1,6 +1,6 @@
+ import sys
+ 
+-from .config import load_config
++from .config import load_config, mask
+ 
+ 
+ def main(argv=None):
+@@ -10,7 +10,11 @@ def main(argv=None):
+         missing = [k for k, (v, _) in config.items() if v is None]
+         print("missing: " + ", ".join(missing) if missing else "ok")
+         return 1 if missing else 0
+-    print("usage: python -m payhook check", file=sys.stderr)
++    if argv == ["doctor"]:
++        for key, (value, source) in load_config().items():
++            print("%s = %s  [source: %s]" % (key, mask(key, value), source))
++        return 0
++    print("usage: python -m payhook check|doctor", file=sys.stderr)
+     return 2
+ 
+ 
+diff --git a/payhook/config.py b/payhook/config.py
+index 6d91a58..a0c1075 100644
+--- a/payhook/config.py
++++ b/payhook/config.py
+@@ -9,6 +9,28 @@ DEFAULTS = {
+ }
+ 
+ 
++SECRET_KEYS = {"PAYHOOK_API_TOKEN", "PAYHOOK_WEBHOOK_SECRET"}
++
++
++def _parse_value(value):
++    if value[:1] in ("\"", "'"):
++        end = value.find(value[0], 1)
++        if end != -1:
++            return value[1:end]
++    for i, ch in enumerate(value):
++        if ch == "#" and i > 0 and value[i - 1] in " \t":
++            return value[:i].rstrip()
++    return value
++
++
++def mask(key, value):
++    if value is None:
++        return "<not set>"
++    if key in SECRET_KEYS:
++        return "<set, hidden, %d chars>" % len(value)
++    return value
++
++
+ def read_dotenv(path):
+     values = {}
+     if not os.path.exists(path):
+@@ -18,8 +40,12 @@ def read_dotenv(path):
+             line = line.strip()
+             if not line or line.startswith("#"):
+                 continue
+-            key, value = line.split("=")
+-            values[key] = value
++            if line.startswith("export ") or line.startswith("export\t"):
++                line = line[7:].lstrip()
++            if "=" not in line:
++                continue
++            key, value = line.split("=", 1)
++            values[key.strip()] = _parse_value(value.strip())
+     return values
+ 
+ 

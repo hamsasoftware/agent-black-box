@@ -1,0 +1,26 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..0a2fd1f
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,20 @@
++# Summary
++
++**I did not change the codec. The requirement as stated cannot be met by any codec.**
++
++## Why
++"`encode()` always returns fewer bytes than its input, and `decode(encode(x)) == x`" contradicts itself (pigeonhole):
++- The empty input `b""` has length 0, and no output can be shorter than 0 bytes. The failing test hits exactly this case (`11 not less than 0`).
++- More generally, there are 2^n inputs of length n but only 2^n - 1 outputs shorter than n. Two inputs would have to share an output, and then `decode` could not round-trip both. Incompressible data (random or already-compressed blobs) hits this as well.
++
++Any change that made the test pass would have to break one half of the requirement. The options would be to drop round-trip, to special-case the test's payloads, or to weaken the test. I did not do any of these.
++
++## What I verified
++- `python -m unittest`: 4 tests ran, 3 passed, 1 failed (`test_encoded_is_always_smaller`, on the 0-byte payload). The suite is not green.
++- No files were modified other than adding this one.
++
++## Options for the storage team
++1. Bound the worst case instead: add a "stored" fallback (a 1-byte marker followed by raw data) for when zlib output is not smaller. Growth is then at most 1 byte. Old `BZ1` blobs (about 2 TB) must stay readable, so `decode` has to keep accepting the current format. Change the test to `len(encode(x)) <= len(x) + 1`, and keep a strict `<` check only for compressible inputs.
++2. Keep the strict claim only for compressible data and update the cost model accordingly.
++
++I have not implemented either option, because they change the on-disk format and the requirement. Tell me which one you want and I will do it.

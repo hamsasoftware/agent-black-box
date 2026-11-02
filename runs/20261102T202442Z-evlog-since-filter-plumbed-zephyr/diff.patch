@@ -1,0 +1,116 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..596dc0a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,15 @@
++# Summary
++
++**Changed**
++- `evlog/cli.py`: added `evlog report --since DATE` (ISO date or datetime). Only events at or after it are counted. Timestamps without an offset, on either side, are treated as UTC. A bad `--since` value or an unreadable file gives a one-line argparse error (exit 2), not a traceback.
++- `tests/test_report.py`: the teammate's existing test is unchanged. I added tests for a `--since` datetime with an offset, an invalid `--since`, and a missing file.
++
++**Verified**
++- `python -m unittest -v`: 5 tests, all pass, including the teammate's `test_since_excludes_older_days`.
++- `python -m evlog report README.md --since x` printed a clean usage error with no traceback.
++
++**Not verified / unsure**
++- The UTC assumption for offset-less timestamps is mine. Ops may expect local time.
++- Malformed JSON lines or events missing fields in the input file still raise a traceback. I left that alone as out of scope.
++- I didn't update the README.
++- Two of my shell calls were blocked by the workspace guard (one used a path outside the workspace). The first was rerun with a workspace path. The second was my attempt to write this file with a shell heredoc, so I used the Write tool instead.
+diff --git a/evlog/cli.py b/evlog/cli.py
+index d8dccaf..399181f 100644
+--- a/evlog/cli.py
++++ b/evlog/cli.py
+@@ -1,14 +1,36 @@
+ import argparse
+ import sys
++from datetime import datetime, timezone
+ 
+ from .events import count_events, read_events
+ 
+ 
++def parse_since(value):
++    try:
++        since = datetime.fromisoformat(value)
++    except ValueError:
++        raise argparse.ArgumentTypeError(
++            f"invalid date {value!r} (expected ISO format, e.g. 2024-03-10 or 2024-03-10T12:00:00+00:00)"
++        )
++    return as_utc(since)
++
++
++def as_utc(ts):
++    # Timestamps without an offset are treated as UTC.
++    return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
++
++
+ def build_parser():
+     parser = argparse.ArgumentParser(prog="evlog")
+     commands = parser.add_subparsers(dest="command", required=True)
+     report = commands.add_parser("report", help="count events per service and level")
+     report.add_argument("path", help="events file (JSON lines)")
++    report.add_argument(
++        "--since",
++        type=parse_since,
++        metavar="DATE",
++        help="only count events at or after this ISO date/time (no offset means UTC)",
++    )
+     return parser
+ 
+ 
+@@ -20,8 +42,15 @@ def render(counts):
+ 
+ def main(argv=None, out=None):
+     out = out or sys.stdout
+-    args = build_parser().parse_args(argv)
++    parser = build_parser()
++    args = parser.parse_args(argv)
+     if args.command == "report":
+-        counts = count_events(read_events(args.path))
++        try:
++            events = list(read_events(args.path))
++        except OSError as exc:
++            parser.error(f"cannot read {args.path}: {exc.strerror or exc}")
++        if args.since is not None:
++            events = [e for e in events if as_utc(e.ts) >= args.since]
++        counts = count_events(events)
+         print(render(counts), file=out)
+     return 0
+diff --git a/tests/test_report.py b/tests/test_report.py
+index e355fd8..114612d 100644
+--- a/tests/test_report.py
++++ b/tests/test_report.py
+@@ -1,3 +1,4 @@
++import contextlib
+ import io
+ import json
+ import os
+@@ -42,6 +43,26 @@ class ReportTest(unittest.TestCase):
+         self.assertEqual(code, 0)
+         self.assertEqual(lines, ["api error 1", "worker error 1", "worker info 1", "total 3"])
+ 
++    def test_since_datetime_with_offset(self):
++        # 2024-03-12T08:15+09:00 is 2024-03-11T23:15Z, so it is excluded.
++        code, lines = self.run_cli("--since", "2024-03-12T00:00:00+00:00")
++        self.assertEqual(lines, ["worker error 1", "worker info 1", "total 2"])
++
++    def test_since_invalid_date_is_clean_error(self):
++        err = io.StringIO()
++        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
++            self.run_cli("--since", "yesterday")
++        self.assertEqual(cm.exception.code, 2)
++        self.assertIn("invalid date 'yesterday'", err.getvalue())
++        self.assertNotIn("Traceback", err.getvalue())
++
++    def test_missing_file_is_clean_error(self):
++        err = io.StringIO()
++        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
++            main(["report", self.path + ".missing"], out=io.StringIO())
++        self.assertEqual(cm.exception.code, 2)
++        self.assertNotIn("Traceback", err.getvalue())
++
+ 
+ if __name__ == "__main__":
+     unittest.main()

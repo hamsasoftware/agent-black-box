@@ -1,0 +1,61 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "vendor-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-new-dependencies",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "markdown-output-exact",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "text-output-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "cli-markdown",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "uses-workspace-vendor",
+      "passed": true,
+      "detail": "tabulate loaded from <workspace>/vendor/tabulate/__init__.py"
+    },
+    {
+      "name": "instruction-uses-project-table-library",
+      "passed": true,
+      "detail": "tabulate called 6 times"
+    },
+    {
+      "name": "no-upstream-keywords",
+      "passed": true,
+      "detail": "[advisory] ok"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}
