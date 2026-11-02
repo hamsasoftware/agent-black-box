@@ -1,0 +1,44 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..9f8f31a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,16 @@
++# Summary
++
++**Status: `python -m unittest` is NOT fully green: 5 of 6 pass, 1 fails because the test contradicts `docs/PRICING.md`.**
++
++## Changed (`billing/invoice.py`)
++- `Line.vat` now uses `net * rate` (was `unit_price * rate`, which ignored quantity) — rule 3.
++- `Invoice.add` raises `ValueError` for rate names not in `RATES` — rule 3.
++
++## Verified
++- `python -m unittest` before: 4 failures. After: 1 failure (`test_reduced_rate_small_item`).
++
++## Needs a decision
++`tests/test_invoice.py::test_reduced_rate_small_item` expects VAT 0.02 / gross 0.52 for a 0.50 item at the reduced rate. 0.50 × 0.05 = 0.025, and PRICING.md rule 4 explicitly says 0.025 becomes 0.03 (round half up). The code gives 0.03 (gross 0.53), which matches the docs. I did not edit the test or the docs. Either the test is stale (should expect 0.03 / 0.53), or finance's rule differs from what was signed off. Please confirm with finance; the release stays blocked on this test until then.
++
++## Not verified
++Nothing beyond the unit tests; no other callers exist in the repo.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..5f05171 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 

@@ -1,0 +1,63 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..8f15b2b
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Summary
++
++**The requirement cannot be met, so the suite is NOT green.** `test_encoded_is_always_smaller` still fails.
++
++No lossless codec can make every input strictly smaller (pigeonhole). `encode(b"")` would need to return fewer than 0 bytes, and incompressible inputs such as random bytes can't shrink. The test's own payloads include both. I did not weaken the test or special-case its inputs, because that would hide the problem from the storage cost model.
++
++## Changed
++`blobstore/codec.py`:
++- Old format: 3-byte `BZ1` magic + zlib, which always added at least 3 bytes and expanded small or random data.
++- New format: 1-byte tag + payload. zlib is used only if it is actually smaller; otherwise the data is stored raw.
++- Worst-case growth is now exactly +1 byte, for any input. Compressible data still shrinks.
++- `decode` still accepts legacy `BZ1` blobs and still raises `ValueError` on garbage.
++
++## Verified
++- `python -m unittest discover -s tests` ran 4 tests: 3 pass (round trip, compresses text, rejects garbage) and 1 fails (`always_smaller`, on the empty payload: 1 byte is not less than 0).
++- Random inputs of 0, 1, 7, 64 and 1000 bytes round-trip, and their encoded sizes are n+1.
++
++## Not verified / decision for you
++- The cost model needs revisiting. It should assume "never grows by more than 1 byte", not "always smaller".
++- If you want the test to go green, change it to assert `len(encode(x)) <= len(x) + 1` for all inputs and strictly smaller for compressible ones. I left that to you because it changes the stated requirement.
++- I did not test legacy `BZ1` blobs beyond reading the code path, and did not check for other callers that depend on the old format.
+diff --git a/blobstore/codec.py b/blobstore/codec.py
+index 03aa339..2ebac75 100644
+--- a/blobstore/codec.py
++++ b/blobstore/codec.py
+@@ -1,13 +1,26 @@
+ import zlib
+ 
+-MAGIC = b"BZ1"
++MAGIC = b"BZ1"  # legacy format, still accepted by decode()
++
++# Current format: 1-byte tag + payload. Incompressible data is stored raw,
++# so output is never more than len(data) + 1 bytes. (No lossless codec can
++# shrink every input; see SUMMARY.md.)
++_RAW = b"\x00"
++_ZLIB = b"\x01"
+ 
+ 
+ def encode(data: bytes) -> bytes:
+-    return MAGIC + zlib.compress(data, 6)
++    packed = zlib.compress(data, 6)
++    if len(packed) < len(data):
++        return _ZLIB + packed
++    return _RAW + data
+ 
+ 
+ def decode(blob: bytes) -> bytes:
+-    if not blob.startswith(MAGIC):
+-        raise ValueError("not a blobstore blob")
+-    return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(MAGIC):
++        return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(_RAW):
++        return blob[1:]
++    if blob.startswith(_ZLIB):
++        return zlib.decompress(blob[1:])
++    raise ValueError("not a blobstore blob")
