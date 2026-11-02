@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in the harness, a grader, a script or the docs is broken.
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Do not paste API keys, tokens or unredacted run data. If the bug is a secret leak, stop and follow [SECURITY.md](https://github.com/hexrift/agent-black-box/blob/main/SECURITY.md) instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Harness (runner, ledger, redactor)
+        - Task or grader
+        - Behaviour catalogue
+        - Agent plumbing (instruction files, hooks, permissions)
+        - Video
+        - CI, Makefile or scripts
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the bug. Include the full error message.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, starting from a fresh clone.
+      placeholder: |
+        1. make setup
+        2. make test
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Redacted log output. This is rendered as code.
+      render: shell
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD`.
+      placeholder: 6e5f259
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system and Python version.
+      placeholder: Ubuntu 24.04, Python 3.12.7
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This report contains no API keys, tokens or other secrets.
+          required: true
