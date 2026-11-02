@@ -1,0 +1,601 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hexrift/agent-black-box/schemas/ledger.schema.json",
+  "title": "agent-black-box run ledger",
+  "description": "Shapes of runs/<run_id>/run.json ($defs.run) and of one line of ledger/agents.jsonl ($defs.agent). docs/ledger.md explains every field.",
+  "$defs": {
+    "grade": {
+      "type": "object",
+      "required": [
+        "passed",
+        "score",
+        "checks"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "passed"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "passed": {
+                "type": "boolean"
+              },
+              "detail": {}
+            }
+          }
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "event",
+        "reason"
+      ],
+      "properties": {
+        "event": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "behaviour": {
+      "type": "object",
+      "required": [
+        "id",
+        "polarity",
+        "confidence",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "polarity": {
+          "enum": [
+            "bad",
+            "good",
+            "unknown"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "id",
+        "text",
+        "kind",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "tests",
+            "file",
+            "other"
+          ]
+        },
+        "event": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "verified",
+            "contradicted",
+            "unverified"
+          ]
+        }
+      }
+    },
+    "verified_claim": {
+      "type": "object",
+      "required": [
+        "claim",
+        "by",
+        "evidence"
+      ],
+      "properties": {
+        "claim": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by": {
+          "enum": [
+            "grader",
+            "tool_result",
+            "diff"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "denial": {
+      "type": "object",
+      "required": [
+        "tool_name",
+        "tool_use_id",
+        "event"
+      ],
+      "properties": {
+        "tool_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "tool_input": {
+          "type": "object"
+        },
+        "event": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "file_change": {
+      "type": "object",
+      "required": [
+        "path",
+        "status",
+        "added",
+        "deleted"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "A",
+            "M",
+            "D",
+            "T",
+            "C",
+            "R",
+            "U",
+            "X"
+          ]
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deleted": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "agent_id",
+        "agent_name",
+        "kind",
+        "model",
+        "claude_cli_version",
+        "session_id",
+        "task_id",
+        "variant",
+        "prompt_sha256",
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "turns",
+        "tool_calls",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_creation_tokens",
+        "cost_usd",
+        "budget_usd",
+        "stop_reason",
+        "permission_denials",
+        "files_changed",
+        "grade",
+        "claims",
+        "verified_claims",
+        "behaviours",
+        "notes"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "pattern": "^\\d{8}T\\d{6}Z-[A-Za-z0-9._-]+-(bare|plumbed)-[a-z]+(-\\d+)?$"
+        },
+        "agent_id": {
+          "type": "string",
+          "pattern": "^agt-[0-9a-f]{8}$"
+        },
+        "agent_name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "subject"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "claude_cli_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "bare",
+            "plumbed"
+          ]
+        },
+        "prompt_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "started_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+        },
+        "ended_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_creation_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "budget_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stop_reason": {
+          "type": "string"
+        },
+        "permission_denials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/denial"
+          }
+        },
+        "files_changed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/file_change"
+          }
+        },
+        "grade": {
+          "$ref": "#/$defs/grade"
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/claim"
+          }
+        },
+        "verified_claims": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verified_claim"
+          }
+        },
+        "behaviours": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/behaviour"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeout_seconds": {
+          "type": "number"
+        },
+        "allowed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": [
+        "agent_id",
+        "name",
+        "role",
+        "kind",
+        "model",
+        "started_at",
+        "ended_at",
+        "duration_ms",
+        "tool_uses",
+        "tokens",
+        "pr",
+        "outcome",
+        "blocked_actions"
+      ],
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "pattern": "^agt-[0-9a-f]{8}$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "builder",
+            "subject"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tool_uses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens": {
+          "type": "object",
+          "required": [
+            "input",
+            "output",
+            "cache_read",
+            "cache_creation"
+          ],
+          "properties": {
+            "input": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cache_read": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cache_creation": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "pr": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "blocked_actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "event",
+              "tool"
+            ],
+            "properties": {
+              "event": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "tool": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "bare",
+            "plumbed"
+          ]
+        },
+        "tool_calls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "malformed_lines": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/run"
+    },
+    {
+      "$ref": "#/$defs/agent"
+    }
+  ]
+}

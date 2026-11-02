@@ -1,0 +1,32 @@
+# runs
+
+One directory per recorded run of a subject agent on a task. Everything here has passed the redactor. Field-level detail is in [docs/ledger.md](../docs/ledger.md).
+
+## Run ids
+
+`<UTC start>-<task id>-<variant>-<name>`, for example `20261102T194422Z-off-by-one-bare-ember`. The name is the subject's roster name, lower-cased.
+
+## Files in a run directory
+
+| File | What it is |
+|---|---|
+| `run.json` | The record: model, cost, tokens, turns, tool counts, stop reason, denials, files changed, grade, claims, behaviours with evidence, notes. |
+| `events.jsonl` | Every stream event in order, as `{"i", "t_ms", "event"}`. Behaviour evidence and claims point at `i`. |
+| `diff.patch` | What the agent changed, against the baseline commit of the fixture. |
+| `grade.json` | The hidden grader's verdict and checks. |
+
+## Reading a run
+
+1. Open `run.json`: `grade.passed`, `stop_reason`, `cost_usd`, then `behaviours`.
+2. For each behaviour, look up its `evidence[].event` indexes in `events.jsonl`.
+3. Compare `claims` (what the agent said) with `verified_claims` and `grade` (what was checked).
+4. Read `diff.patch` for the actual change.
+
+## Regenerating aggregates
+
+```
+python -m blackbox index      # rewrites runs/index.jsonl from runs/*/run.json
+python -m blackbox report     # rewrites docs/results.md
+python -m blackbox validate   # checks every run.json and ledger/agents.jsonl
+python -m blackbox scan runs ledger
+```
