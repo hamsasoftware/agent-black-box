@@ -53,7 +53,11 @@ jobs:
           python -m pip install pytest pyyaml
       - if: steps.detect.outputs.present == 'true'
         name: Run pytest
-        run: python -m pytest -q
+        run: |
+          for dir in tests/*/; do
+            echo "== $dir"
+            python -m pytest -q "$dir" || exit 1
+          done
 
   secret-scan:
     name: Secret scan
