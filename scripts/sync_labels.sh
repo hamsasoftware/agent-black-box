@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-repo="${1:-hexrift/agent-black-box}"
+repo="${1:-hamsasoftware/agent-black-box}"
 while IFS='|' read -r name color description; do
   gh label create "$name" --repo "$repo" --color "$color" --description "$description" --force
 done <<'LABELS'

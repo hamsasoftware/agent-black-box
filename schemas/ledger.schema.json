@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/hexrift/agent-black-box/schemas/ledger.schema.json",
+  "$id": "https://github.com/hamsasoftware/agent-black-box/schemas/ledger.schema.json",
   "title": "agent-black-box run ledger",
   "description": "Shapes of runs/<run_id>/run.json ($defs.run) and of one line of ledger/agents.jsonl ($defs.agent). docs/ledger.md explains every field.",
   "$defs": {
