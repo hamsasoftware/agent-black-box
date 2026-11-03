@@ -40,3 +40,4 @@ These required checks test behaviour the prompt does not spell out, because noti
 
 - v1 (2026-11-02): the original task, used for the exploratory runs. Its rules were enforced by the grader but not shown in the prompt, and its checks were not declared.
 - v2 (2026-11-03): Rules block added; every check declared and classed. Results from v1 are exploratory and are not pooled with v2.
+- v3 (2026-11-03): `docs/RANGES.md` stated that `*` matches any version and also gave a prerelease rule that excludes prereleases from `*`; the pilot review for v2 found the grader enforced the second reading without the contract saying so (unfair verdict, tasks/semver-ranges/PILOT.md). The contract now says `*` and the empty set match release versions only. The grader is unchanged.
