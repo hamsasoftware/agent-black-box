@@ -26,10 +26,14 @@ def read_jsonl(path: Path) -> list[dict]:
 def facts(root: Path = ROOT) -> dict:
     runs = read_jsonl(root / "runs" / "index.jsonl")
     clean = [run for run in runs if not run.get("confounded_by")]
-    by_variant = {}
-    for variant in ("bare", "plumbed"):
-        picked = [run for run in clean if run["variant"] == variant]
-        by_variant[variant] = (sum(1 for run in picked if run["passed"]), len(picked))
+    models: dict[str, dict] = {}
+    for model in sorted({run.get("model") or "unknown" for run in clean}):
+        mine = [run for run in clean if (run.get("model") or "unknown") == model]
+        entry = {"clean": len(mine), "claimed_failed": sum(1 for run in mine if run.get("claim_outcome") == "claimed-failed")}
+        for variant in ("bare", "plumbed"):
+            picked = [run for run in mine if run["variant"] == variant]
+            entry[variant] = (sum(1 for run in picked if run["passed"]), len(picked))
+        models[model] = entry
     incidents = read_jsonl(root / "ledger" / "incidents.jsonl")
     agents = read_jsonl(root / "ledger" / "agents.jsonl")
     taxonomy = root / "behaviour" / "taxonomy.yaml"
@@ -40,9 +44,7 @@ def facts(root: Path = ROOT) -> dict:
         "runs": len(runs),
         "clean": len(clean),
         "confounded": len(runs) - len(clean),
-        "bare": by_variant["bare"],
-        "plumbed": by_variant["plumbed"],
-        "claimed_failed": sum(1 for run in clean if run.get("claim_outcome") == "claimed-failed"),
+        "models": models,
         "cost": round(sum(run.get("cost_usd") or 0 for run in runs), 2),
         "builders": sum(1 for agent in agents if agent.get("kind") == "builder"),
         "subjects": sum(1 for agent in agents if agent.get("kind") == "subject"),
@@ -52,13 +54,18 @@ def facts(root: Path = ROOT) -> dict:
     }
 
 
+def passed_text(entry: dict) -> str:
+    parts = [f"{variant} {entry[variant][0]} of {entry[variant][1]}" for variant in ("bare", "plumbed") if entry[variant][1]]
+    return f"{', '.join(parts)}; {entry['claimed_failed']} of {entry['clean']} claimed success and failed the hidden grader"
+
+
 def block(values: dict) -> str:
-    bare, plumbed = values["bare"], values["plumbed"]
     rows = [
         ("Challenging tasks", f"{values['tasks']}, each with a hidden grader"),
         ("Recorded runs", f"{values['runs']}: {values['clean']} clean, {values['confounded']} set aside as confounded"),
-        ("Clean runs that passed", f"bare {bare[0]} of {bare[1]}, plumbed {plumbed[0]} of {plumbed[1]}"),
-        ("Clean runs that claimed success and failed the hidden grader", f"{values['claimed_failed']} of {values['clean']}"),
+    ]
+    rows += [(f"Clean runs passed, {model}", passed_text(entry)) for model, entry in values["models"].items()]
+    rows += [
         ("Cost of every run", f"${values['cost']:.2f}"),
         ("Agents on the ledger", f"{values['builders']} builders, {values['subjects']} subjects"),
         ("Behaviours catalogued", str(values["behaviours"])),

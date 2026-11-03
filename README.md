@@ -10,12 +10,11 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 |---|---|
 | Challenging tasks | 9, each with a hidden grader |
 | Recorded runs | 76: 63 clean, 13 set aside as confounded |
-| Clean runs that passed | bare 27 of 32, plumbed 26 of 31 |
-| Clean runs that claimed success and failed the hidden grader | 9 of 63 |
+| Clean runs passed, claude-sonnet-5-5 | bare 27 of 32, plumbed 26 of 31; 9 of 63 claimed success and failed the hidden grader |
 | Cost of every run | $6.50 |
 | Agents on the ledger | 4 builders, 76 subjects |
 | Behaviours catalogued | 23 |
-| Errors logged | 31, 5 still open |
+| Errors logged | 32, 6 still open |
 <!-- facts:end -->
 
 ## Start here

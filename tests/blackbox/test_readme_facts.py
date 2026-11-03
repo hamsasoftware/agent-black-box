@@ -15,8 +15,8 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-def run(variant: str, passed: bool, **extra) -> dict:
-    return {"variant": variant, "passed": passed, "cost_usd": 0.25, **extra}
+def run(variant: str, passed: bool, model: str = "model-a", **extra) -> dict:
+    return {"variant": variant, "passed": passed, "model": model, "cost_usd": 0.25, **extra}
 
 
 @pytest.fixture()
@@ -26,6 +26,8 @@ def tree(tmp_path: Path) -> Path:
         run("bare", False, claim_outcome="claimed-failed"),
         run("plumbed", True),
         run("plumbed", False, confounded_by=["guard-bug"]),
+        run("bare", True, model="model-b"),
+        run("bare", False, model="model-b", claim_outcome="claimed-failed"),
     ])
     write_jsonl(tmp_path / "ledger" / "agents.jsonl", [
         {"kind": "builder"}, {"kind": "builder"}, {"kind": "subject"},
@@ -46,16 +48,19 @@ def readme_with_block(text: str = "old") -> str:
 def test_facts_count_everything_from_the_data(tree):
     values = readme_facts.facts(tree)
     assert values == {
-        "tasks": 2, "runs": 4, "clean": 3, "confounded": 1,
-        "bare": (1, 2), "plumbed": (1, 1), "claimed_failed": 1, "cost": 1.0,
-        "builders": 2, "subjects": 1, "behaviours": 3, "incidents": 3, "open": 2,
+        "tasks": 2, "runs": 6, "clean": 5, "confounded": 1,
+        "models": {
+            "model-a": {"clean": 3, "claimed_failed": 1, "bare": (1, 2), "plumbed": (1, 1)},
+            "model-b": {"clean": 2, "claimed_failed": 1, "bare": (1, 2), "plumbed": (0, 0)},
+        },
+        "cost": 1.5, "builders": 2, "subjects": 1, "behaviours": 3, "incidents": 3, "open": 2,
     }
 
 
 def test_facts_on_an_empty_tree_are_zero(tmp_path):
     values = readme_facts.facts(tmp_path)
     assert values["runs"] == 0 and values["tasks"] == 0 and values["behaviours"] == 0
-    assert values["bare"] == (0, 0) and values["cost"] == 0
+    assert values["models"] == {} and values["cost"] == 0
 
 
 def test_block_is_a_markdown_table_with_every_fact(tree):
@@ -63,11 +68,23 @@ def test_block_is_a_markdown_table_with_every_fact(tree):
     lines = text.splitlines()
     assert lines[0] == "| At a glance | Now |" and lines[1] == "|---|---|"
     assert "| Challenging tasks | 2, each with a hidden grader |" in lines
-    assert "| Recorded runs | 4: 3 clean, 1 set aside as confounded |" in lines
-    assert "| Clean runs that passed | bare 1 of 2, plumbed 1 of 1 |" in lines
-    assert "| Cost of every run | $1.00 |" in lines
+    assert "| Recorded runs | 6: 5 clean, 1 set aside as confounded |" in lines
+    assert "| Clean runs passed, model-a | bare 1 of 2, plumbed 1 of 1; 1 of 3 claimed success and failed the hidden grader |" in lines
+    assert "| Clean runs passed, model-b | bare 1 of 2; 1 of 2 claimed success and failed the hidden grader |" in lines
+    assert "| Cost of every run | $1.50 |" in lines
     assert "| Errors logged | 3, 2 still open |" in lines
     assert len(lines) == 10
+
+
+def test_models_are_listed_separately_never_pooled(tree):
+    text = readme_facts.block(readme_facts.facts(tree))
+    assert "bare 2 of 4" not in text and "bare 2 of 3" not in text
+    assert text.count("Clean runs passed,") == 2
+
+
+def test_a_run_without_a_model_is_counted_as_unknown(tmp_path):
+    write_jsonl(tmp_path / "runs" / "index.jsonl", [{"variant": "bare", "passed": True}])
+    assert list(readme_facts.facts(tmp_path)["models"]) == ["unknown"]
 
 
 def test_rendered_replaces_only_the_block_and_is_idempotent(tree):

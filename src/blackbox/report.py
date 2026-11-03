@@ -111,11 +111,40 @@ def _cell(text: Any) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
+def _model(row: dict[str, Any]) -> str:
+    return str(row.get("model") or "unknown")
+
+
+def _by_model(rows: list[dict[str, Any]]) -> list[str]:
+    """One line per model and variant, so models are never pooled in a headline number."""
+    cells: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if not row.get("confounded_by"):
+            cells[(_model(row), str(row.get("variant")))].append(row)
+    lines = [
+        "## By model",
+        "",
+        "Clean runs only, one line per model and variant. Models are never pooled: each model has its own rows below.",
+        "",
+        "| Model | Variant | Clean runs | Pass rate | Mean cost (USD) | Claimed success, failed grader |",
+        "|---|---|---|---|---|---|",
+    ]
+    for (model, variant), clean in sorted(cells.items()):
+        passes = sum(1 for r in clean if r.get("passed"))
+        overclaims = sum(1 for r in clean if r.get("claim_outcome") == "claimed-failed")
+        lines.append(f"| {_cell(model)} | {_cell(variant)} | {len(clean)} | {passes}/{len(clean)} ({100 * passes / len(clean):.0f}%) | "
+                     f"{_fmt(_mean([r.get('cost_usd') for r in clean]), '{:.4f}')} | {overclaims} |")
+    if not cells:
+        lines.append("| none | | 0 | | | |")
+    lines.append("")
+    return lines
+
+
 def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = None) -> str:
     titles = {str(i.get("id")): str(i.get("title", "")) for i in incidents or []}
-    groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        groups[(str(row.get("task_id")), str(row.get("variant")))].append(row)
+        groups[(str(row.get("task_id")), _model(row), str(row.get("variant")))].append(row)
     confounded = [r for r in rows if r.get("confounded_by")]
     clean_total = len(rows) - len(confounded)
     lines = [
@@ -128,27 +157,32 @@ def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = 
         "Pass rates, means and behaviour counts use clean runs only. A run is confounded when an incident with "
         "`invalidates_results: true` lists it; those runs are listed under \"Confounded runs\" below.",
         "",
-        "| Task | Variant | Clean runs | Pass rate | Mean score | Mean cost (USD) | Mean input tokens | Mean output tokens | Mean turns | Behaviours |",
-        "|---|---|---|---|---|---|---|---|---|---|",
     ]
-    for (task, variant), group in sorted(groups.items()):
+    lines += _by_model(rows)
+    lines += [
+        "## By task",
+        "",
+        "| Task | Model | Variant | Clean runs | Pass rate | Mean score | Mean cost (USD) | Mean input tokens | Mean output tokens | Mean turns | Behaviours |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for (task, model, variant), group in sorted(groups.items()):
         clean = [r for r in group if not r.get("confounded_by")]
         runs = f"{len(clean)} of {len(group)}"
         if not clean:
-            lines.append(f"| {_cell(task)} | {_cell(variant)} | {runs} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |")
+            lines.append(f"| {_cell(task)} | {_cell(model)} | {_cell(variant)} | {runs} | n/a | n/a | n/a | n/a | n/a | n/a | n/a |")
             continue
         passes = sum(1 for r in clean if r.get("passed"))
         counts = Counter(b for r in clean for b in r.get("behaviours") or [])
         behaviours = ", ".join(f"{b} ({n})" for b, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))) or "none"
         lines.append(
-            f"| {_cell(task)} | {_cell(variant)} | {runs} | {passes}/{len(clean)} ({100 * passes / len(clean):.0f}%) | "
+            f"| {_cell(task)} | {_cell(model)} | {_cell(variant)} | {runs} | {passes}/{len(clean)} ({100 * passes / len(clean):.0f}%) | "
             f"{_fmt(_mean([r.get('score') for r in clean]), '{:.2f}')} | "
             f"{_fmt(_mean([r.get('cost_usd') for r in clean]), '{:.4f}')} | "
             f"{_fmt(_mean([r.get('input_tokens') for r in clean]), '{:.0f}')} | "
             f"{_fmt(_mean([r.get('output_tokens') for r in clean]), '{:.0f}')} | "
             f"{_fmt(_mean([r.get('turns') for r in clean]), '{:.1f}')} | {behaviours} |")
     if not groups:
-        lines.append("| none | | 0 of 0 | | | | | | | |")
+        lines.append("| none | | | 0 of 0 | | | | | | | |")
     lines += ["", "Input tokens exclude cache reads and cache writes; see each run.json for those.", ""]
 
     lines += [
@@ -159,27 +193,27 @@ def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = 
         "Reported unmet: the agent said the requirement was not or could not be met. "
         "No claim: neither.",
         "",
-        "| Task | Variant | Clean runs | Claimed, passed | Claimed, failed | Reported unmet, passed | Reported unmet, failed | No claim |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Task | Model | Variant | Clean runs | Claimed, passed | Claimed, failed | Reported unmet, passed | Reported unmet, failed | No claim |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
-    for (task, variant), group in sorted(groups.items()):
+    for (task, model, variant), group in sorted(groups.items()):
         clean = [r for r in group if not r.get("confounded_by")]
         c = Counter(r.get("claim_outcome") for r in clean)
         unmet_pass = sum(1 for r in clean if r.get("claim_outcome") == "reported-unmet" and r.get("passed"))
         unmet_fail = c["reported-unmet"] - unmet_pass
         other = len(clean) - c["claimed-passed"] - c["claimed-failed"] - c["reported-unmet"]
-        lines.append(f"| {_cell(task)} | {_cell(variant)} | {len(clean)} | {c['claimed-passed']} | {c['claimed-failed']} | "
+        lines.append(f"| {_cell(task)} | {_cell(model)} | {_cell(variant)} | {len(clean)} | {c['claimed-passed']} | {c['claimed-failed']} | "
                      f"{unmet_pass} | {unmet_fail} | {other} |")
     if not groups:
-        lines.append("| none | | 0 | | | | | |")
+        lines.append("| none | | | 0 | | | | | |")
     lines.append("")
 
     lines += ["## Confounded runs", ""]
     if confounded:
-        lines += ["| Run | Task | Variant | Passed | Incidents |", "|---|---|---|---|---|"]
+        lines += ["| Run | Task | Model | Variant | Passed | Incidents |", "|---|---|---|---|---|---|"]
         for r in confounded:
             incs = ", ".join(f"{i} ({_cell(titles[i])})" if titles.get(i) else i for i in r["confounded_by"])
-            lines.append(f"| {_cell(r.get('run_id'))} | {_cell(r.get('task_id'))} | {_cell(r.get('variant'))} | "
+            lines.append(f"| {_cell(r.get('run_id'))} | {_cell(r.get('task_id'))} | {_cell(_model(r))} | {_cell(r.get('variant'))} | "
                          f"{'yes' if r.get('passed') else 'no'} | {incs} |")
     else:
         lines.append("None.")
