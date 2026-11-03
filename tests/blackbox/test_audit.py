@@ -331,7 +331,7 @@ def gated_rows():
 def test_tags_are_unaudited_without_a_passed_audit():
     md = report.render(gated_rows(), [])
     assert "minimal-diff (unaudited)" in md and "minimal-diff (2)" not in md
-    assert "| m | bare | exploratory | 2 | 1/2 (50%) | n/a | 1 | unaudited |" in md
+    assert "| m | bare | exploratory | 2 | 1/2 (50%) | n/a | unaudited | unaudited |" in md
 
 
 def test_a_failed_audit_is_also_shown_as_unaudited():
@@ -342,8 +342,8 @@ def test_a_failed_audit_is_also_shown_as_unaudited():
 def test_a_passed_tag_is_counted_and_the_rest_stay_unaudited():
     md = report.render(gated_rows(), [], {"minimal-diff": "passed"})
     assert "minimal-diff (2), claim-contradicted-by-grader (unaudited)" in md
-    assert "| 1 | unaudited |" in md
-    md = report.render(gated_rows(), [], {"claim-contradicted-by-grader": "passed"})
+    assert "| unaudited | unaudited |" in md
+    md = report.render(gated_rows(), [], {"claim-classifier": "passed", "claim-contradicted-by-grader": "passed"})
     assert "| m | bare | exploratory | 2 | 1/2 (50%) | n/a | 1 | 1 |" in md
 
 
@@ -367,3 +367,87 @@ def test_build_report_reads_the_audit_ledger(root, tmp_path):
     path.write_text("")
     report.build_report(root, Redactor(()))
     assert f"{TAG} (unaudited)" in (root / "docs" / "results.md").read_text()
+
+
+# ---------------------------------------------------------------- claim figures gated on the classifier audit
+
+CLAIM_UNAUDITED_ROW = "| t | v1 | m | bare | 2 | unaudited | unaudited | unaudited | unaudited | unaudited |"
+CLAIM_COUNTED_ROW = "| t | v1 | m | bare | 2 | 1 | 1 | 0 | 0 | 0 |"
+BY_MODEL_UNAUDITED = "| m | bare | exploratory | 2 | 1/2 (50%) | n/a | unaudited | unaudited |"
+BY_MODEL_COUNTED = "| m | bare | exploratory | 2 | 1/2 (50%) | n/a | 1 | 1 |"
+TAG_PASSED = "claim-contradicted-by-grader"
+
+
+@pytest.mark.parametrize("state", ["failed", "unaudited", None])
+def test_claim_figures_are_withheld_unless_the_classifier_audit_passed(state):
+    states = {TAG_PASSED: "passed"} | ({} if state is None else {audit.CLASSIFIER: state})
+    md = report.render(gated_rows(), [], states)
+    assert CLAIM_UNAUDITED_ROW in md and CLAIM_COUNTED_ROW not in md
+    assert BY_MODEL_UNAUDITED in md and BY_MODEL_COUNTED not in md
+    assert "claim classifier" in md and "docs/protocol.md section 7" in md
+
+
+def test_claim_figures_are_counted_when_the_classifier_audit_passed():
+    md = report.render(gated_rows(), [], {audit.CLASSIFIER: "passed", TAG_PASSED: "passed"})
+    assert CLAIM_COUNTED_ROW in md and BY_MODEL_COUNTED in md and CLAIM_UNAUDITED_ROW not in md
+
+
+def test_the_contradicted_column_also_needs_its_own_tag_audit():
+    md = report.render(gated_rows(), [], {audit.CLASSIFIER: "passed"})
+    assert "| m | bare | exploratory | 2 | 1/2 (50%) | n/a | 1 | unaudited |" in md
+    assert CLAIM_COUNTED_ROW in md
+
+
+def test_the_grader_pass_rate_does_not_depend_on_the_classifier():
+    md = report.render(gated_rows(), [], {})
+    assert "1/2 (50%)" in md and "| t | v1 | m | bare | 2 of 2 | 1/2 (50%) |" in md
+
+
+def test_a_changed_classifier_makes_the_report_withhold_claims_again(root):
+    from blackbox.redact import Redactor
+    record_all(root, tag=audit.CLASSIFIER, seed=3)
+    assert state(root, audit.CLASSIFIER).state == "passed"
+    report.build_report(root, Redactor(()))
+    md = (root / "docs" / "results.md").read_text()
+    assert "| t1 | v1 | m | bare | 26 | 26 | 0 | 0 | 0 | 0 |" in md
+    assert "| t1 | v1 | m | bare | 26 | unaudited" not in md
+    import blackbox.claims as claims
+    old = claims.SPLIT
+    claims.SPLIT = re.compile("changed")
+    try:
+        assert state(root, audit.CLASSIFIER).state == "unaudited"
+        report.build_report(root, Redactor(()))
+    finally:
+        claims.SPLIT = old
+    assert "| t1 | v1 | m | bare | 26 | unaudited | unaudited | unaudited | unaudited | unaudited |" in (root / "docs" / "results.md").read_text()
+
+
+@pytest.mark.parametrize("name", ["SPLIT", "TEST_CLAIM", "FILE_REF", "CLAIM_VERB"])
+def test_editing_what_claims_extract_reads_changes_the_classifier_fingerprint(root, monkeypatch, name):
+    before = audit.fingerprint(audit.CLASSIFIER, root)
+    monkeypatch.setattr("blackbox.claims." + name, re.compile("different"))
+    assert audit.fingerprint(audit.CLASSIFIER, root) != before
+
+
+def test_editing_claims_extract_or_verify_changes_the_classifier_fingerprint(root, monkeypatch):
+    from blackbox import claims
+    before = audit.fingerprint(audit.CLASSIFIER, root)
+
+    def extract(final_text, event_index):
+        return []
+    monkeypatch.setattr(claims, "extract", extract)
+    assert audit.fingerprint(audit.CLASSIFIER, root) != before
+    monkeypatch.undo()
+    assert audit.fingerprint(audit.CLASSIFIER, root) == before
+
+    def verify(claims_, stream, files_changed, grade):
+        return []
+    monkeypatch.setattr(claims, "verify", verify)
+    assert audit.fingerprint(audit.CLASSIFIER, root) != before
+
+
+def test_editing_a_helper_only_verify_reads_changes_the_classifier_fingerprint(root, monkeypatch):
+    from blackbox import claims
+    before = audit.fingerprint(audit.CLASSIFIER, root)
+    monkeypatch.setattr(claims, "test_checks_failed", lambda grade: True)
+    assert audit.fingerprint(audit.CLASSIFIER, root) != before

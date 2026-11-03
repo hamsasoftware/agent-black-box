@@ -124,7 +124,7 @@ The grader is the instrument for pass, result pass, rule violation and contradic
 - A tag may appear in a published table only if it has passed an audit recorded in `ledger/audits.jsonl`.
 - **Audit:** for each tag, review every tagged run if there are ten or fewer, otherwise ten chosen by a recorded seed, against the raw events and the diff. Also review ten untagged runs from cells where the tag occurs. Record one line per run: tag, task, model, run id, verdict (`correct`, `wrong`, `unclear`), reviewer, date and a note.
 - A tag passes if at least nine of ten tagged runs are `correct` and no more than one of the ten untagged runs shows the behaviour. Otherwise it is published only as "unaudited" and is never counted.
-- The claim classifier is audited the same way, on twenty runs.
+- The claim classifier is audited the same way, on twenty runs. Every published figure derived from it (claimed against the grader, overclaims, reported unmet, no claim) is shown only while that audit has passed, and as "unaudited" otherwise.
 - A detector change invalidates its audit. The tag is unaudited until audited again.
 - The audit file, the sampling, the fingerprint that detects a detector change and the `python -m blackbox audit` commands are described in [ledger.md](ledger.md#ledgerauditsjsonl-fields); `blackbox report` counts only tags whose audit has passed.
 

@@ -41,12 +41,15 @@ def tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
+BOTH = {"claim-classifier": "passed", "claim-contradicted-by-grader": "passed"}
+
+
 def readme_with_block(text: str = "old") -> str:
     return f"# Title\n\nintro\n\n{readme_facts.START}\n{text}\n{readme_facts.END}\n\nafter\n"
 
 
 def test_facts_count_everything_from_the_data(tree):
-    values = readme_facts.facts(tree)
+    values = readme_facts.facts(tree, BOTH)
     assert values == {
         "tasks": 2, "runs": 6, "clean": 5, "confounded": 1,
         "models": {
@@ -64,7 +67,7 @@ def test_facts_on_an_empty_tree_are_zero(tmp_path):
 
 
 def test_block_is_a_markdown_table_with_every_fact(tree):
-    text = readme_facts.block(readme_facts.facts(tree))
+    text = readme_facts.block(readme_facts.facts(tree, BOTH))
     lines = text.splitlines()
     assert lines[0] == "| At a glance | Now |" and lines[1] == "|---|---|"
     assert "| Challenging tasks | 2, each with a hidden grader |" in lines
@@ -139,3 +142,33 @@ def test_protocol_runs_are_counted_apart_from_exploratory_runs(tmp_path):
     assert models["model-a, protocol 1"]["bare"] == (1, 2)
     text = readme_facts.block(readme_facts.facts(tmp_path))
     assert "Clean runs passed, model-a, protocol 1 | bare 1 of 2" in text
+
+
+def test_unaudited_classifier_prints_no_claim_counts(tree):
+    for states in ({}, {"claim-classifier": "failed", "claim-contradicted-by-grader": "passed"}):
+        values = readme_facts.facts(tree, states)
+        assert values["models"]["model-a, exploratory"]["claimed_failed"] is None
+        assert values["models"]["model-a, exploratory"]["contradicted"] is None
+        text = readme_facts.block(values)
+        assert "| Clean runs passed, model-a, exploratory | bare 1 of 2, plumbed 1 of 1; claim figures unaudited |" in text
+        assert "claimed success" not in text and "contradicted" not in text
+        assert "bare 1 of 2" in text  # the grader pass rate is still shown
+
+
+def test_contradicted_is_unaudited_until_its_own_tag_passes(tree):
+    text = readme_facts.block(readme_facts.facts(tree, {"claim-classifier": "passed"}))
+    assert ("| Clean runs passed, model-a, exploratory | bare 1 of 2, plumbed 1 of 1; 1 of 3 claimed success and failed "
+            "the hidden grader (contradicted by a result check: unaudited) |") in text
+
+
+def test_facts_read_the_audit_ledger_when_no_states_are_given(tree):
+    values = readme_facts.facts(tree)
+    assert values["models"]["model-a, exploratory"]["claimed_failed"] is None
+
+
+def test_the_real_readme_facts_are_gated_on_the_real_audit_ledger():
+    values = readme_facts.facts()
+    states = readme_facts.audit_states()
+    if states.get("claim-classifier") != "passed":
+        assert all(m["claimed_failed"] is None for m in values["models"].values())
+        assert "claimed success" not in readme_facts.block(values)

@@ -229,14 +229,16 @@ def fingerprint(tag: str, root: Path) -> str:
     source of every blackbox function it reaches by name, the value of every module-level pattern or constant it
     reads, and the source of every Context, Stream and tool-event member it uses. Taxonomy: the tag's entry in
     behaviour/taxonomy.yaml as canonical JSON. A tag with no detector hashes the entry and the word `undetected`.
-    The claim classifier hashes `report.claim_outcome` and everything it reaches (claims.py, the stream parser).
+    The claim classifier hashes `report.claim_outcome`, `claims.extract` and `claims.verify` and everything they reach
+    (claims.py, the stream parser).
     Any edit to any of these changes the hash, which makes the tag unaudited until it is audited again.
     """
     members = _members()
     parts: dict[str, str] = {}
     if tag == CLASSIFIER:
-        from blackbox import report
-        _collect(report.claim_outcome, parts, members)
+        from blackbox import claims, report
+        for fn in (report.claim_outcome, claims.extract, claims.verify):
+            _collect(fn, parts, members)
         parts["outcomes"] = repr(report.OUTCOMES)
     else:
         det = behaviours.REGISTRY.get(tag)

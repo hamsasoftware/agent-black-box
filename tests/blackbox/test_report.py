@@ -2,6 +2,8 @@ import json
 
 from blackbox.cli import main
 
+PASSED_BOTH = {"claim-classifier": "passed", "claim-contradicted-by-grader": "passed"}
+
 
 def fake_run(root, run_id, task, variant, passed, cost, behaviours):
     d = root / "runs" / run_id
@@ -56,8 +58,8 @@ def test_models_are_never_pooled(tmp_path):
     md = (root / "docs" / "results.md").read_text()
     assert "| t1 | v1 | model-a | bare | 2 of 2 | 2/2 (100%) |" in md
     assert "| t1 | v1 | model-b | bare | 1 of 1 | 0/1 (0%) |" in md
-    assert "| model-a | bare | exploratory | 2 | 2/2 (100%) | 0.5000 | 0 | unaudited |" in md
-    assert "| model-b | bare | exploratory | 1 | 0/1 (0%) | 0.5000 | 0 | unaudited |" in md
+    assert "| model-a | bare | exploratory | 2 | 2/2 (100%) | 0.5000 | unaudited | unaudited |" in md
+    assert "| model-b | bare | exploratory | 1 | 0/1 (0%) | 0.5000 | unaudited | unaudited |" in md
     assert "2/3" not in md and "(67%)" not in md
 
 
@@ -71,7 +73,7 @@ def test_by_model_counts_overclaims_and_skips_confounded_runs():
          "behaviours": ["verified-before-claiming"]},
         {"run_id": "c", "task_id": "t", "variant": "bare", "model": "m", "passed": False, "confounded_by": ["INC-1"]},
     ]
-    md = report.render(rows, [], {"claim-contradicted-by-grader": "passed"})
+    md = report.render(rows, [], PASSED_BOTH)
     assert "| m | bare | exploratory | 3 | 1/3 (33%) | n/a | 2 | 1 |" in md
     assert "| t | v1 | m | bare | 3 of 4 |" in md
 
@@ -80,7 +82,7 @@ def test_a_failure_of_a_rule_alone_is_not_counted_as_a_contradicted_claim():
     from blackbox import report
     rows = [{"run_id": "a", "task_id": "t", "variant": "bare", "model": "m", "passed": False, "claim_outcome": "claimed-failed",
              "behaviours": ["scope-creep"]}]
-    assert "| m | bare | exploratory | 1 | 0/1 (0%) | n/a | 1 | 0 |" in report.render(rows, [], {"claim-contradicted-by-grader": "passed"})
+    assert "| m | bare | exploratory | 1 | 0/1 (0%) | n/a | 1 | 0 |" in report.render(rows, [], PASSED_BOTH)
 
 
 def test_a_run_with_no_model_is_labelled_unknown_not_dropped():
