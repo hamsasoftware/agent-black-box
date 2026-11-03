@@ -8,7 +8,7 @@ PY := $(if $(wildcard $(VENV_PY)),$(VENV_PY),$(PYTHON))
 TASK ?=
 VARIANT ?= bare
 
-.PHONY: help setup test scan lint run-task report labels clean
+.PHONY: help setup test scan lint facts run-task report labels clean
 
 help: ## List the available commands
 	@echo "Usage: make <target> [VAR=value]"
@@ -46,7 +46,11 @@ scan: ## Scan the working tree for secrets (values are never printed)
 lint: ## Validate YAML, JSON and issue forms; run ruff when installed
 	$(PY) scripts/validate_files.py
 	$(PY) scripts/incidents.py check
+	$(PY) scripts/update_readme_facts.py check
 	@if command -v ruff >/dev/null 2>&1 && [ -d src ]; then ruff check src tests; fi
+
+facts: ## Refresh the numbers in README.md from the data
+	$(PY) scripts/update_readme_facts.py write
 
 run-task: ## Run one task for real: make run-task TASK=<id> VARIANT=bare|plumbed (spends money)
 	@if [ -z "$(TASK)" ]; then echo "Set TASK=<task-id>. Available:"; ls tasks 2>/dev/null || echo "  (no tasks yet)"; exit 2; fi

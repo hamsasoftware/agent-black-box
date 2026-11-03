@@ -8,14 +8,13 @@ Every document in this repository, what it is for and who should read it. Docume
 |---|---|---|
 | [README](../README.md) | What the project is, its principles and where to go next | Everyone |
 | [CONTRIBUTING](../CONTRIBUTING.md) | Quickstart, branch and commit rules, adding a task, proposing a practice | Contributors |
-| [Navigation proposal](navigation-proposal.md) | Draft "Start here" section for the README | Maintainers |
 
 ## How it works
 
 | Document | What it is | For |
 |---|---|---|
 | [ARCHITECTURE](../ARCHITECTURE.md) | Modules and owners, task format, run ledger fields, safety rules | Contributors, reviewers |
-| `docs/ledger.md` *(planned)* | How the harness records, redacts and grades a run | Anyone reading run data |
+| [Ledger and run format](ledger.md) | How the harness records, redacts, grades and replays a run | Anyone reading run data |
 | [Model choice](model-choice.md) | Which subject model is used and why | Researchers |
 | [Agent plumbing](plumbing.md) | Each plumbing file, the practice it implements, its sources and limits, and how its effect is measured | Practitioners, researchers |
 | [Incident log](incidents.md) | Every error found while building or running the repo: who introduced it, who found it, impact, fix and lesson | Everyone, especially anyone adding an agent or a detector |
@@ -29,9 +28,9 @@ Every document in this repository, what it is for and who should read it. Docume
 | [Best practices](best-practices.md) | Dated, cited industry practice for agent instruction files, permissions, hooks and subagents | Practitioners |
 | [What trips agents](what-trips-agents.md) | Documented failure modes with evidence and trap ideas | Task authors, researchers |
 | [sources.json](sources.json) | Machine-readable list of every source, with URL and date | Researchers, tooling |
-| `behaviour/taxonomy.yaml` *(planned)* | The behaviour ids used in run records and issue forms | Researchers, task authors |
-| `runs/` *(generated)* | One directory per recorded run: `run.json`, `events.jsonl`, `diff.patch`, `grade.json` | Anyone checking a claim |
-| `docs/video.md` *(planned)* | How the replay video is built from run data | Viewers, video contributors |
+| [Behaviour catalogue](../behaviour/README.md) | The good and bad behaviour ids used in run records and issue forms | Researchers, task authors |
+| [Results](results.md) | Pass rates, claims against the grader and the confounded runs, generated from the run index | Anyone checking a claim |
+| [runs/](../runs/README.md) | One directory per recorded run: `run.json`, `events.jsonl`, `diff.patch`, `grade.json` | Anyone checking a claim |
 
 ## Contributing
 
