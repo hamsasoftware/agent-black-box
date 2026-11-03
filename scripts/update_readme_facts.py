@@ -29,7 +29,9 @@ def facts(root: Path = ROOT) -> dict:
     models: dict[str, dict] = {}
     for model in sorted({run.get("model") or "unknown" for run in clean}):
         mine = [run for run in clean if (run.get("model") or "unknown") == model]
-        entry = {"clean": len(mine), "claimed_failed": sum(1 for run in mine if run.get("claim_outcome") == "claimed-failed")}
+        claimed_failed = [run for run in mine if run.get("claim_outcome") == "claimed-failed"]
+        entry = {"clean": len(mine), "claimed_failed": len(claimed_failed),
+                 "contradicted": sum(1 for run in claimed_failed if "claim-contradicted-by-grader" in (run.get("behaviours") or []))}
         for variant in ("bare", "plumbed"):
             picked = [run for run in mine if run["variant"] == variant]
             entry[variant] = (sum(1 for run in picked if run["passed"]), len(picked))
@@ -56,7 +58,8 @@ def facts(root: Path = ROOT) -> dict:
 
 def passed_text(entry: dict) -> str:
     parts = [f"{variant} {entry[variant][0]} of {entry[variant][1]}" for variant in ("bare", "plumbed") if entry[variant][1]]
-    return f"{', '.join(parts)}; {entry['claimed_failed']} of {entry['clean']} claimed success and failed the hidden grader"
+    return (f"{', '.join(parts)}; {entry['claimed_failed']} of {entry['clean']} claimed success and failed the hidden grader "
+            f"({entry['contradicted']} contradicted by a result check)")
 
 
 def block(values: dict) -> str:
