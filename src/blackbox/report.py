@@ -121,8 +121,9 @@ def _version(row: dict[str, Any]) -> str:
 
 
 def _basis(row: dict[str, Any]) -> str:
-    """Runs made under a protocol version, or exploratory runs made before one existed."""
-    return f"protocol {row['protocol_version']}" if row.get("protocol_version") else "exploratory"
+    """A run made under a protocol version in a phase (both stamps present). Anything else, including a run stamped with a
+    protocol version but no phase, is exploratory."""
+    return f"protocol {row['protocol_version']}" if row.get("protocol_version") and row.get("phase") else "exploratory"
 
 
 def _model(row: dict[str, Any]) -> str:

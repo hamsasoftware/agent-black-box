@@ -348,7 +348,7 @@ def test_a_passed_tag_is_counted_and_the_rest_stay_unaudited():
 
 
 def test_grouping_by_model_and_version_survives_gating():
-    rows = gated_rows() + [{"run_id": "c", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare",
+    rows = gated_rows() + [{"run_id": "c", "task_id": "t", "task_version": 2, "protocol_version": 1, "phase": 1, "variant": "bare",
                             "model": "n", "passed": True, "behaviours": ["minimal-diff"]}]
     md = report.render(rows, [], {"minimal-diff": "passed"})
     assert "| t | v1 | m | bare | 2 of 2 |" in md and "| t | v2 | n | bare | 1 of 1 |" in md

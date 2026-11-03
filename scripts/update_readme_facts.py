@@ -45,7 +45,7 @@ def facts(root: Path = ROOT, states: dict | None = None) -> dict:
     clean = [run for run in runs if not run.get("confounded_by")]
     models: dict[str, dict] = {}
     def basis(run):
-        return f"protocol {run['protocol_version']}" if run.get("protocol_version") else "exploratory"
+        return f"protocol {run['protocol_version']}" if run.get("protocol_version") and run.get("phase") else "exploratory"
 
     for model, how in sorted({(run.get("model") or "unknown", basis(run)) for run in clean}):
         mine = [run for run in clean if (run.get("model") or "unknown") == model and basis(run) == how]

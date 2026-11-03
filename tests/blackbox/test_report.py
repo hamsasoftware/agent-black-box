@@ -101,8 +101,8 @@ def test_task_versions_are_never_pooled():
     from blackbox import report
     rows = [
         {"run_id": "a", "task_id": "t", "task_version": 1, "variant": "bare", "model": "m", "passed": False},
-        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True},
-        {"run_id": "c", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True},
+        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "phase": 1, "variant": "bare", "model": "m", "passed": True},
+        {"run_id": "c", "task_id": "t", "task_version": 2, "protocol_version": 1, "phase": 1, "variant": "bare", "model": "m", "passed": True},
     ]
     md = report.render(rows, [])
     assert "| t | v1 | m | bare | 1 of 1 | 0/1 (0%) |" in md
@@ -114,7 +114,7 @@ def test_exploratory_and_protocol_runs_get_separate_lines_in_the_by_model_table(
     from blackbox import report
     rows = [
         {"run_id": "a", "task_id": "t", "variant": "bare", "model": "m", "passed": False},
-        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True},
+        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "phase": 1, "variant": "bare", "model": "m", "passed": True},
     ]
     md = report.render(rows, [])
     assert "| m | bare | exploratory | 1 | 0/1 (0%) |" in md
@@ -124,7 +124,23 @@ def test_exploratory_and_protocol_runs_get_separate_lines_in_the_by_model_table(
 
 def test_the_index_row_carries_the_task_version_and_protocol():
     from blackbox import report
-    row = report.index_row({"run_id": "x", "task_id": "t", "task_version": 2, "protocol_version": 1, "grade": {"passed": True}})
+    row = report.index_row({"run_id": "x", "task_id": "t", "task_version": 2, "protocol_version": 1, "phase": 1, "grade": {"passed": True}})
     assert row["task_version"] == 2 and row["protocol_version"] == 1
     old = report.index_row({"run_id": "y", "task_id": "t", "grade": {"passed": False}})
     assert old["task_version"] == 1 and old["protocol_version"] is None
+
+
+def test_a_protocol_version_without_a_phase_is_exploratory_everywhere_in_the_report():
+    from blackbox import report
+    rows = [
+        {"run_id": "a", "task_id": "t", "variant": "bare", "model": "m", "passed": False},
+        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True,
+         "claim_outcome": "claimed-failed"},
+        {"run_id": "c", "task_id": "t", "task_version": 2, "protocol_version": 1, "phase": 1, "variant": "bare", "model": "m", "passed": True},
+    ]
+    md = report.render(rows, [])
+    assert "| m | bare | exploratory | 2 | 1/2 (50%) |" in md
+    assert "| m | bare | protocol 1 | 1 | 1/1 (100%) |" in md
+    assert report._basis({"run_id": "old"}) == "exploratory"
+    assert report._basis({"run_id": "x", "protocol_version": 1, "phase": None}) == "exploratory"
+    assert report._basis({"run_id": "x", "protocol_version": 1, "phase": 1}) == "protocol 1"
