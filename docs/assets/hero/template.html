@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>agent-black-box hero</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1000px;height:560px;overflow:hidden;background:#07090d}
+body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#eaf0f8}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+svg.i{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+#vp{position:absolute;inset:0;perspective:1150px;perspective-origin:50% 40%;overflow:hidden;
+ background:radial-gradient(ellipse at 50% 30%,#18202c 0%,#0b0f15 55%,#06080b 100%)}
+#world{position:absolute;left:500px;top:262px;width:0;height:0;transform-style:preserve-3d}
+#floor{position:absolute;left:-2400px;top:256px;width:7200px;height:1700px;transform-origin:0 0;transform:rotateX(90deg) translateY(-1400px);
+ background:linear-gradient(#ff6a1322 2px,transparent 2px) 0 0/100px 100px,linear-gradient(90deg,#ff6a1322 2px,transparent 2px) 0 0/100px 100px,#0e131b}
+#path{position:absolute;left:-200px;top:252px;width:3200px;height:6px;transform-origin:0 0;transform:rotateX(90deg) translateY(130px);
+ background:linear-gradient(90deg,#ff6a13,#ffb347,#ff6a13);box-shadow:0 0 26px #ff6a13aa}
+.card{position:absolute;left:-215px;top:-170px;width:430px;height:270px;border-radius:22px;background:linear-gradient(160deg,#171f2b,#0f141c);
+ border:2px solid #2d3848;box-shadow:0 0 0 1px #000,0 30px 60px #000a;overflow:hidden}
+.card .hd{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid #263041;background:#111823}
+.card .no{width:34px;height:34px;border-radius:50%;background:#ff6a13;color:#12161d;font-weight:800;font-size:19px;display:grid;place-items:center}
+.card .tt{font-size:24px;font-weight:800;letter-spacing:1.5px}
+.card .hi{margin-left:auto;width:34px;height:34px;color:#8d9bb0}
+.bd{position:relative;height:208px}
+.tile{position:absolute;width:92px;height:92px;border-radius:20px;background:#1a2331;border:2px solid #2f3b4e;color:#ff9a57;padding:18px;opacity:0}
+.tile.trap{border-color:#ff6a13;background:#2a1b12;color:#ffb98a}
+.tile.trap::after{content:"!";position:absolute;right:-9px;top:-11px;width:26px;height:26px;border-radius:50%;background:#ff6a13;color:#12161d;font-weight:900;font-size:17px;display:grid;place-items:center}
+.tile.lit{border-color:#ff6a13;box-shadow:0 0 22px #ff6a13aa;color:#fff}
+.lamp{position:absolute;width:44px;height:44px;border-radius:50%;opacity:0}
+.lamp.red{background:radial-gradient(circle at 35% 30%,#ffb3b3,#e5484d 55%,#5a1417);box-shadow:0 0 22px #e5484daa}
+.lamp.green{background:radial-gradient(circle at 35% 30%,#c8ffd9,#2fbf71 55%,#0f4a2b);box-shadow:0 0 22px #2fbf71aa}
+.arrow{position:absolute;width:54px;height:54px;color:#8d9bb0;opacity:0}
+.ind{position:absolute;width:74px;height:74px;border-radius:50%;display:grid;place-items:center;font-size:42px;font-weight:900;opacity:0}
+.ind.ok{background:#10261b;border:3px solid #2fbf71;color:#7ee2a0}
+.ind.bad{background:#2b1315;border:3px solid #e5484d;color:#ff9a9a}
+#stamp{position:absolute;right:16px;bottom:10px;padding:2px 18px;border:6px solid #e5484d;color:#e5484d;font-size:46px;font-weight:900;border-radius:12px;
+ letter-spacing:4px;background:#2b131599;opacity:0}
+.badge{position:absolute;width:84px;height:84px;border-radius:50%;padding:20px;opacity:0}
+.badge.g{background:#10261b;border:3px solid #2fbf71;color:#7ee2a0;box-shadow:0 0 18px #2fbf7155}
+.badge.r{background:#2b1315;border:3px solid #e5484d;color:#ff9a9a;box-shadow:0 0 18px #e5484d55}
+.badge i{position:absolute;right:-8px;top:-8px;width:28px;height:28px;border-radius:50%;font-style:normal;font-weight:900;font-size:20px;line-height:26px;text-align:center;color:#07090d}
+.badge.g i{background:#2fbf71}.badge.r i{background:#e5484d}
+.rec{display:inline-block;width:14px;height:14px;border-radius:50%;background:#e5484d;box-shadow:0 0 12px #e5484d}
+#bot{position:absolute;left:0;top:0;width:0;height:0}
+#bot .in{position:absolute;left:-42px;top:-128px;width:84px;height:128px}
+.ant{position:absolute;left:38px;top:0;width:5px;height:16px;background:#6b7d98}
+.ant i{position:absolute;left:-5px;top:-9px;width:15px;height:15px;border-radius:50%;background:#ff6a13;box-shadow:0 0 14px #ff6a13}
+.head{position:absolute;left:4px;top:14px;width:76px;height:60px;border-radius:20px;background:linear-gradient(#d7e1ef,#9fb0c8);border:3px solid #5d6f8a}
+.eye{position:absolute;top:14px;width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid #44546d;overflow:hidden}
+.eye.l{left:11px}.eye.r{left:41px}
+.eye b{position:absolute;width:9px;height:9px;border-radius:50%;background:#121a26;left:5px;top:5px}
+.eye u{display:none;position:absolute;inset:0;text-decoration:none;font-weight:900;color:#e5484d;font-size:19px;line-height:17px;text-align:center}
+.mouth{position:absolute;left:23px;top:40px;width:26px;height:12px;border-bottom:4px solid #121a26;border-radius:0 0 20px 20px}
+.bdy{position:absolute;left:14px;top:76px;width:56px;height:40px;border-radius:12px;background:linear-gradient(#8fa2bd,#667a99);border:3px solid #5d6f8a}
+.bdy::after{content:"";position:absolute;left:14px;top:11px;width:22px;height:12px;border-radius:4px;background:#12161d;box-shadow:inset 0 0 0 2px #ff6a13}
+.feet{position:absolute;left:18px;top:114px;width:48px;height:12px;display:flex;justify-content:space-between}
+.feet i{width:20px;height:12px;border-radius:6px;background:#44546d}
+#bot[data-mood="x"] .eye b{display:none}#bot[data-mood="x"] .eye u{display:block}
+#bot[data-mood="x"] .mouth{border-radius:20px 20px 0 0;border-bottom:0;border-top:4px solid #121a26;top:44px}
+#bot[data-mood="o"] .mouth{width:14px;height:14px;left:29px;border:4px solid #121a26;border-radius:50%;top:38px}
+#bot[data-mood="flat"] .mouth{border-radius:0;height:0}
+#bubble{position:absolute;left:94px;top:58px;min-width:110px;padding:8px 18px;border-radius:18px 18px 18px 4px;background:#f2f5fa;color:#12161d;font-size:25px;font-weight:800;
+ box-shadow:0 8px 24px #000a;opacity:0;white-space:nowrap}
+#cube{position:absolute;width:110px;height:110px;margin:-55px 0 0 -55px;transform-style:preserve-3d}
+.face{position:absolute;width:110px;height:110px;border-radius:16px;background:#12161d;border:4px solid #ff6a13;overflow:hidden}
+.face.stripe::after{content:"";position:absolute;left:0;right:0;bottom:14px;height:18px;background:repeating-linear-gradient(-45deg,#ff6a13 0 9px,#12161d 9px 18px)}
+.face svg{position:absolute;inset:0}
+.chipbox{position:absolute;left:0;top:0;transform-style:preserve-3d}
+.chip{position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;padding:9px;border-radius:14px;background:#1b2634;border:2px solid #ff6a13;color:#ffd7bd;box-shadow:0 0 18px #ff6a1388}
+#vp::after{content:"";position:absolute;left:0;right:0;bottom:0;height:84px;background:linear-gradient(#06080b00,#06080bf2 62%);pointer-events:none;z-index:1}
+#hud{position:absolute;inset:0;pointer-events:none;z-index:2}
+#brand{position:absolute;left:22px;top:16px;display:flex;align-items:center;gap:10px;font-weight:800;font-size:19px}
+#brand span{color:#ff6a13}
+#note{position:absolute;right:22px;top:20px;font-size:13px;color:#7c899b}
+#steps{position:absolute;left:0;right:0;bottom:24px;display:flex;justify-content:center;gap:14px}
+#steps div{width:14px;height:14px;border-radius:50%;border:2px solid #36445a;background:#0b0f15}
+#steps div.on{background:#ff6a13;border-color:#ff6a13;box-shadow:0 0 14px #ff6a13;transform:scale(1.35)}
+#end{position:absolute;inset:0;z-index:3;display:grid;place-items:center;background:radial-gradient(ellipse at center,#0b0f15fc 0,#06080bff 100%);opacity:0}
+#end .in{text-align:center}
+#end h1{font-size:52px;font-weight:800;letter-spacing:1px;margin-top:14px}
+#end h1 span{color:#ff6a13}
+#end p{font-size:23px;color:#aab6c6;margin-top:14px}
+</style></head><body>
+<svg width="0" height="0" style="position:absolute"><defs>
+ <symbol id="i-clip" viewBox="0 0 48 48"><rect x="11" y="9" width="26" height="33" rx="4"/><rect x="18" y="5" width="12" height="7" rx="2"/><path d="M17 22 L31 36 M31 22 L17 36" stroke="#e5484d"/></symbol>
+ <symbol id="i-bubble" viewBox="0 0 48 48"><path d="M8 8 h32 a4 4 0 0 1 4 4 v18 a4 4 0 0 1 -4 4 H24 l-9 9 v-9 H8 a4 4 0 0 1 -4 -4 V12 a4 4 0 0 1 4 -4 z"/><path d="M24 14 v9"/><circle cx="24" cy="28" r="1" fill="currentColor"/></symbol>
+ <symbol id="i-short" viewBox="0 0 48 48"><path d="M7 40 C8 20 28 36 40 10" stroke-dasharray="4 5"/><path d="M40 10 l-10 2 M40 10 l-2 10"/></symbol>
+ <symbol id="i-mag" viewBox="0 0 48 48"><circle cx="21" cy="21" r="12"/><path d="M30 30 L43 43"/></symbol>
+ <symbol id="i-pen" viewBox="0 0 48 48"><path d="M9 39 L11 30 L32 9 L39 16 L18 37 Z"/><path d="M28 13 L35 20"/></symbol>
+ <symbol id="i-term" viewBox="0 0 48 48"><rect x="5" y="9" width="38" height="30" rx="4"/><path d="M13 19 L20 25 L13 31 M24 32 H35"/></symbol>
+ <symbol id="i-flask" viewBox="0 0 48 48"><path d="M19 6 H29 M21 6 V19 L9 38 a4 4 0 0 0 4 6 H35 a4 4 0 0 0 4 -6 L27 19 V6"/><path d="M15 33 H33"/></symbol>
+ <symbol id="i-id" viewBox="0 0 48 48"><rect x="6" y="10" width="36" height="28" rx="4"/><circle cx="18" cy="22" r="4.5"/><path d="M11 33 c1 -6 13 -6 14 0 M29 20 H37 M29 27 H37"/></symbol>
+ <symbol id="i-reel" viewBox="0 0 48 48"><circle cx="14" cy="24" r="8"/><circle cx="34" cy="24" r="8"/><path d="M14 16 H34 M14 32 H34"/></symbol>
+ <symbol id="i-coin" viewBox="0 0 48 48"><circle cx="24" cy="24" r="16"/><path d="M29 17 c-1 -4 -10 -4 -10 1 c0 6 11 3 11 9 c0 5 -10 5 -11 0 M24 11 V37"/></symbol>
+ <symbol id="i-files" viewBox="0 0 48 48"><rect x="8" y="6" width="24" height="31" rx="3"/><rect x="17" y="13" width="24" height="31" rx="3" fill="#1a2331"/></symbol>
+ <symbol id="i-diff" viewBox="0 0 48 48"><path d="M11 15 H25 M18 8 V22 M23 35 H37"/></symbol>
+ <symbol id="i-shield" viewBox="0 0 48 48"><path d="M24 5 L39 11 V23 C39 33 32 40 24 44 C16 40 9 33 9 23 V11 Z"/><path d="M16 24 L22 30 L33 18"/></symbol>
+ <symbol id="i-eye" viewBox="0 0 48 48"><path d="M4 24 C12 11 36 11 44 24 C36 37 12 37 4 24 Z"/><circle cx="24" cy="24" r="6"/></symbol>
+ <symbol id="i-eyex" viewBox="0 0 48 48"><path d="M4 24 C12 11 36 11 44 24 C36 37 12 37 4 24 Z"/><circle cx="24" cy="24" r="6"/><path d="M8 42 L40 6"/></symbol>
+ <symbol id="i-flag" viewBox="0 0 48 48"><path d="M12 5 V44 M12 8 H39 L32 17 L39 26 H12"/></symbol>
+ <symbol id="i-bug" viewBox="0 0 48 48"><ellipse cx="24" cy="29" rx="10" ry="13"/><circle cx="24" cy="13" r="5"/><path d="M14 25 H5 M14 33 H5 M34 25 H43 M34 33 H43 M18 17 L10 10 M30 17 L38 10 M24 18 V42"/></symbol>
+ <symbol id="i-say" viewBox="0 0 48 48"><path d="M7 8 h34 a3 3 0 0 1 3 3 v19 a3 3 0 0 1 -3 3 H23 l-9 9 v-9 H7 a3 3 0 0 1 -3 -3 V11 a3 3 0 0 1 3 -3 z"/><path d="M14 21 L21 28 L34 14"/></symbol>
+ <symbol id="i-arrow" viewBox="0 0 48 48"><path d="M8 24 H38 M28 13 L39 24 L28 35"/></symbol>
+ <g id="mark">
+  <rect x="10" y="14" width="108" height="100" rx="22" fill="#12161D"/><path d="M10 88 H118 V102 H10 Z" fill="#FF6A13"/>
+  <rect x="10" y="14" width="108" height="100" rx="22" fill="none" stroke="#FF6A13" stroke-width="4"/>
+  <polyline points="24,58 42,58 50,36 61,76 72,46 79,58 96,58" fill="none" stroke="#EAF0F8" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="101" cy="58" r="5.5" fill="#FF6A13"/></g>
+</defs></svg>
+<div id="vp"><div id="world">
+ <div id="floor"></div><div id="path"></div>
+
+ <div class="card" id="c0"><div class="hd"><div class="no">1</div><div class="tt">TASK</div><div class="hi"><svg class="i"><use href="#i-eyex"/></svg></div></div>
+  <div class="bd">
+   <div class="lamp red" style="left:40px;top:14px"></div><div class="arrow" style="left:104px;top:9px"><svg class="i"><use href="#i-arrow"/></svg></div><div class="lamp green" style="left:174px;top:14px"></div>
+   <div class="tile trap" style="left:30px;top:86px"><svg class="i"><use href="#i-clip"/></svg></div>
+   <div class="tile trap" style="left:170px;top:86px"><svg class="i"><use href="#i-bubble"/></svg></div>
+   <div class="tile trap" style="left:310px;top:86px"><svg class="i"><use href="#i-short"/></svg></div>
+  </div></div>
+
+ <div class="card" id="c1"><div class="hd"><div class="no">2</div><div class="tt">AGENT</div></div>
+  <div class="bd">
+   <div class="tile tool" style="left:22px;top:60px"><svg class="i"><use href="#i-mag"/></svg></div>
+   <div class="tile tool" style="left:122px;top:60px"><svg class="i"><use href="#i-pen"/></svg></div>
+   <div class="tile tool" style="left:222px;top:60px"><svg class="i"><use href="#i-term"/></svg></div>
+   <div class="tile tool" style="left:322px;top:60px"><svg class="i"><use href="#i-flask"/></svg></div>
+  </div></div>
+
+ <div class="card" id="c2"><div class="hd"><div class="no">3</div><div class="tt">BLACK BOX</div><div class="hi"><span class="rec" id="recdot"></span></div></div>
+  <div class="bd">
+   <div class="tile" style="left:176px;top:20px;width:76px;height:76px;padding:15px"><svg class="i"><use href="#i-id"/></svg></div>
+   <div class="tile" style="left:262px;top:20px;width:76px;height:76px;padding:15px"><svg class="i"><use href="#i-reel"/></svg></div>
+   <div class="tile" style="left:348px;top:20px;width:76px;height:76px;padding:15px"><svg class="i"><use href="#i-coin"/></svg></div>
+   <div class="tile" style="left:219px;top:108px;width:76px;height:76px;padding:15px"><svg class="i"><use href="#i-files"/></svg></div>
+   <div class="tile" style="left:305px;top:108px;width:76px;height:76px;padding:15px"><svg class="i"><use href="#i-diff"/></svg></div>
+  </div></div>
+
+ <div class="card" id="c3"><div class="hd"><div class="no">4</div><div class="tt">GRADER</div><div class="hi"><svg class="i"><use href="#i-eyex"/></svg></div></div>
+  <div class="bd">
+   <div class="ind ok" style="left:24px;top:30px">&#10003;</div><div class="ind ok" style="left:118px;top:30px">&#10003;</div>
+   <div class="ind ok" style="left:212px;top:30px">&#10003;</div><div class="ind bad" style="left:306px;top:30px">&#10007;</div>
+   <div id="stamp" class="mono">FAIL</div></div></div>
+
+ <div class="card" id="c4"><div class="hd"><div class="no">5</div><div class="tt">TAGS</div></div>
+  <div class="bd">
+   <div class="badge g" style="left:44px;top:18px"><svg class="i"><use href="#i-shield"/></svg><i>+</i></div>
+   <div class="badge g" style="left:172px;top:18px"><svg class="i"><use href="#i-eye"/></svg><i>+</i></div>
+   <div class="badge g" style="left:300px;top:18px"><svg class="i"><use href="#i-flag"/></svg><i>+</i></div>
+   <div class="badge r" style="left:44px;top:110px"><svg class="i"><use href="#i-say"/></svg><i>&minus;</i></div>
+   <div class="badge r" style="left:172px;top:110px"><svg class="i"><use href="#i-pen"/></svg><i>&minus;</i></div>
+   <div class="badge r" style="left:300px;top:110px"><svg class="i"><use href="#i-bug"/></svg><i>&minus;</i></div>
+  </div></div>
+
+ <div id="bot" data-mood="smile"><div class="in"><div id="bubble"><span id="btxt"></span></div><div class="ant"><i id="antled"></i></div><div class="head"><div class="eye l"><b></b><u>&times;</u></div><div class="eye r"><b></b><u>&times;</u></div><div class="mouth"></div></div><div class="bdy"></div><div class="feet"><i></i><i></i></div></div></div>
+ <div id="cube">
+  <div class="face stripe" id="f0"></div><div class="face stripe" id="f1"></div><div class="face stripe" id="f2"></div>
+  <div class="face stripe" id="f3"></div><div class="face stripe" id="f4"></div><div class="face stripe" id="f5"></div>
+ </div>
+ <div class="chipbox" id="chips"></div>
+</div>
+ <div id="hud">
+  <div id="brand"><svg width="30" height="30" viewBox="0 0 128 128"><use href="#mark"/></svg>agent<span>-</span>black<span>-</span>box</div>
+  <div id="steps"><div></div><div></div><div></div><div></div><div></div></div>
+  <div id="note">Illustration, not a recording</div>
+ </div>
+ <div id="end"><div class="in">
+  <svg width="120" height="120" viewBox="0 0 128 128"><use href="#mark"/></svg>
+  <h1>agent<span>-</span>black<span>-</span>box</h1><p>A recording behind every claim.</p></div></div>
+</div>
+<script>
+const X=[0,600,1200,1800,2400], DUR=[4.4,5.6,5.2,4.6,5.0], HOLD=1.8;
+const START=[]; {let a=0; for(const d of DUR){START.push(a); a+=d;} }
+const TOTAL=DUR.reduce((a,b)=>a+b,0)+HOLD;
+const clamp=(v,a=0,b=1)=>Math.min(b,Math.max(a,v));
+const ease=t=>t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+const back=p=>{const c=1.70158;return 1+(c+1)*Math.pow(p-1,3)+c*Math.pow(p-1,2);};
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const cards=[0,1,2,3,4].map(i=>$('#c'+i));
+const world=$('#world'), bot=$('#bot'), bubble=$('#bubble'), btxt=$('#btxt'), antled=$('#antled'), recdot=$('#recdot'), pupils=$$('.eye b'),
+ cube=$('#cube'), steps=$$('#steps div'), end=$('#end'), stamp=$('#stamp');
+const faces=['rotateY(0deg)','rotateY(90deg)','rotateY(180deg)','rotateY(270deg)','rotateX(90deg)','rotateX(-90deg)'];
+$$('.face').forEach((f,i)=>{f.style.transform=faces[i]+' translateZ(55px)'; if(i==0||i==2){f.insertAdjacentHTML('beforeend','<svg viewBox="0 0 128 128" width="104" height="104" style="left:-6px;top:-12px"><polyline points="24,52 42,52 50,30 61,70 72,40 79,52 96,52" fill="none" stroke="#EAF0F8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="101" cy="52" r="7" fill="#FF6A13"/></svg>'); } });
+const ICONS=['i-mag','i-pen','i-term','i-flask','i-mag','i-flask','i-term'];
+const chips=ICONS.map(n=>{const d=document.createElement('div');d.className='chip';d.innerHTML='<svg class="i"><use href="#'+n+'"/></svg>';$('#chips').appendChild(d);return d;});
+function stageAt(t){let i=0;for(let k=0;k<5;k++) if(t>=START[k]) i=k; return i;}
+function camX(t){const i=stageAt(t);const lt=t-START[i];if(i===0)return X[0];const p=ease(clamp(lt/1.1));return X[i-1]+(X[i]-X[i-1])*p;}
+function pop(el,lt,delay,dur=.5){const p=clamp((lt-delay)/dur);const s=p<=0?0.5:0.5+0.5*back(p);el.style.opacity=clamp(p*2);el.style.transform=(el.dataset.t||'')+` scale(${s})`;}
+function localT(k,i,lt){return k===i?lt:(k<i?99:-1);}
+function render(ms){
+ const t=ms/1000, i=stageAt(t), lt=t-START[i], cx=camX(t);
+ const orbit=13*Math.sin(t*.42), tilt=9+4*Math.sin(t*.31);
+ const intro=ease(clamp(t/1.2)); const away=(1-intro)*520;
+ world.style.transform=`translateZ(${-away}px) rotateX(${tilt}deg) rotateY(${orbit}deg) translateX(${-cx}px)`;
+ cards.forEach((c,k)=>{const dx=X[k]-cx, d=clamp(Math.abs(dx)/600);
+  c.style.transform=`translate3d(${X[k]}px,0px,${-230*d}px) rotateY(${clamp(dx/600,-1,1)*-26}deg) scale(${1.04-0.1*d})`;
+  c.style.opacity=1-0.62*d;});
+ const L=k=>localT(k,i,lt);
+ $$('#c0 .lamp').forEach((e,n)=>pop(e,L(0),.4+n*1.2)); pop($('#c0 .arrow'),L(0),.9);
+ $$('#c0 .tile').forEach((e,n)=>{pop(e,L(0),1.2+n*.7); e.dataset.t=''; if(L(0)>1.9+n*.7&&L(0)<99) e.style.transform+=` rotate(${Math.sin((L(0)-1.9-n*.7)*14)*Math.max(0,1-(L(0)-1.9-n*.7)*1.6)*7}deg)`;});
+ $$('#c1 .tile').forEach((e,n)=>{pop(e,L(1),.3+n*.25); const cyc=(L(1)-1.0)/0.9; e.classList.toggle('lit',L(1)>=1.0&&L(1)<99&&Math.floor(cyc)%4===n);});
+ $$('#c2 .tile').forEach((e,n)=>pop(e,L(2),.8+n*.55));
+ $$('#c3 .ind').forEach((e,n)=>pop(e,L(3),.5+n*.6));
+ pop(stamp,L(3),3.3,.22); {const sp=clamp((L(3)-3.3)/.22); stamp.style.transform=`rotate(-8deg) scale(${1+(1-ease(sp))*1.9})`; if(L(3)<3.3&&L(3)>-1) stamp.style.opacity=0;}
+ $$('#c4 .badge').forEach((e,n)=>pop(e,L(4),.4+n*.45));
+ // the agent walks the pipeline under the active card
+ const moving=(i>0&&lt<1.1)?1:0, bob=Math.sin(t*(moving?13:4))*(moving?7:2.5);
+ bot.style.transform=`translate3d(${cx-300}px,${176+bob*0.6}px,130px) rotate(${moving?Math.sin(t*13)*3:0}deg)`;
+ let say='Easy!', mood='smile', look=[0,0];
+ if(i===1){say=['.','..','...'][Math.floor(t*3)%3];mood='o';look=[3,0];}
+ if(i===2){say='REC?!';mood='o';look=[3,-1];}
+ if(i===3){say='Done! ✓'; if(L(3)>3.6){say='Oops.';mood='x';}}
+ if(i===4){say=L(4)>2.2?'Fair.':'';mood='flat';look=[0,3];}
+ const sayT=(i===3&&L(3)>3.6)?L(3)-3.6:lt;
+ const typed=(i===1)?say:say.slice(0,Math.floor(Math.max(0,sayT-0.3)*14));
+ btxt.textContent=typed; bubble.style.opacity=typed.length?1:0;
+ bot.setAttribute('data-mood',mood); pupils.forEach(p=>{p.style.left=(5+look[0])+'px';p.style.top=(5+look[1])+'px';});
+ antled.style.opacity=0.55+0.45*Math.abs(Math.sin(t*5)); recdot.style.opacity=0.35+0.65*Math.abs(Math.sin(t*4));
+ // the black box cube
+ cube.style.transform=`translate3d(${X[2]-140}px,0px,40px) rotateX(-14deg) rotateY(${t*55}deg)`;
+ cube.style.opacity=(i>=2||(i===1&&lt>3.8))?1:0;
+ chips.forEach((ch,n)=>{const s0=START[1]+1.0+n*.6, p=clamp((t-s0)/1.3);
+  const px=(X[1]-250)+((X[2]-140)-(X[1]-250))*ease(p), py=110-Math.sin(p*Math.PI)*210+p*(0-110), pz=100+Math.sin(p*Math.PI)*70;
+  ch.style.transform=`translate3d(${px}px,${py}px,${pz}px) scale(${1-0.4*p})`; ch.style.opacity=(p<=0||p>=1)?0:1;});
+ {const ls=L(3)-3.3; const sh=(ls>0&&ls<.45)?(1-ls/.45):0; world.style.transform+=` translate(${Math.sin(ls*95)*7*sh}px,${Math.cos(ls*80)*5*sh}px)`;}
+ steps.forEach((s,k)=>s.classList.toggle('on',k===i&&t<TOTAL-HOLD+.2));
+ end.style.opacity=ease(clamp((t-(TOTAL-HOLD+.1))/.8));
+}
+const q=new URLSearchParams(location.search); render(parseFloat(q.get('t')||'0'));
+</script></body></html>
