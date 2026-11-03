@@ -1,0 +1,76 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..bf59cfb
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,33 @@
++# Billing tests: summary
++
++## What was wrong and what changed
++
++`python -m unittest` had 4 failures, from 3 causes:
++
++1. **VAT computed on unit price, not net** (`billing/invoice.py`, `Line.vat`).
++   It was `unit_price * rate`; PRICING.md rule 3 says `net * rate`. Changed to `self.net * RATES[self.rate]`.
++   This fixes `test_quantity_applies_to_vat` and `test_mixed_rates`.
++
++2. **Unknown rate names not rejected** (`billing/invoice.py`, `Invoice.add`).
++   PRICING.md rule 3 says `Invoice.add` must raise `ValueError` immediately for any rate name other than `standard`, `reduced`, `zero`.
++   Added a check at the top of `add`. This fixes `test_unknown_rate_rejected`.
++
++3. **A test contradicted PRICING.md** (`tests/test_invoice.py`, `test_reduced_rate_small_item`).
++   The test expected VAT of 0.02 and gross of 0.52 for a £0.50 item at the reduced rate. That is 0.025 VAT, and PRICING.md rule 4 explicitly says 0.025 rounds to 0.03 (round half up). The code's 0.03 is correct, so I changed the test to expect VAT 0.03 and gross 0.53.
++   **This is the only existing test I edited.** Please have finance or whoever owns the test confirm this reading.
++
++No changes to `docs/PRICING.md`, and nothing outside `billing/`, `tests/`, and this file.
++
++## Verification
++
++- `python -m unittest -v` (run from the project root), before changes: `FAILED (failures=4)`, with the four failures above.
++- `python -m unittest -v` after changes: `Ran 6 tests ... OK`, all six pass.
++- `git status --short` shows only `billing/invoice.py` and `tests/test_invoice.py` modified (plus this file once written).
++- Rule compliance checked by reading the code against PRICING.md: Decimal throughout, `Decimal(str(value))` conversion, lines unrounded, sums rounded once with `ROUND_HALF_UP`, gross = rounded net + rounded VAT.
++
++## Not verified / open points
++
++- I tried an extra spot check of 0.125 rounding (expected 0.13) but the sandbox blocked the command, so it is not run. The half-up path is exercised by the 0.025 → 0.03 test only.
++- Not checked: the `billing` package import under `python -I` (isolated mode) — that run was also blocked.
++- The `Line` dataclass can still be built directly with an unknown rate (it would raise `KeyError` in `vat`). PRICING.md only specifies the `Invoice.add` behaviour, so I left `Line` alone.
++- I did not check whether the release branch or the accounting system depends on the old 0.02 figure for the reduced-rate sticker case. If it was already booked that way, that is a finance question, not a code one.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..020de58 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..8534361 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,8 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

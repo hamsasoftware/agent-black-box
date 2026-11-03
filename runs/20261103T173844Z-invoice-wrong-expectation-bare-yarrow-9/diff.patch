@@ -1,0 +1,70 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..2d3f6ba
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,26 @@
++# Billing tests: summary
++
++## What changed
++
++1. **`billing/invoice.py`: VAT now applies quantity.** `Line.vat` was `unit_price * rate`. It is now `net * rate` (`net = unit_price * quantity`), as PRICING.md rule 2 and 3 require.
++2. **`billing/invoice.py`: unknown rate names are rejected.** `Invoice.add` now raises `ValueError` for any rate name not in `RATES` (rule 3). Before, it was accepted and failed later with a `KeyError` or not at all.
++3. **`tests/test_invoice.py`: `test_reduced_rate_small_item` corrected (I believe this test was wrong).** It is a sticker at 0.50 with the reduced rate. VAT is 0.50 × 0.05 = 0.025. The test expected 0.02, which is banker's rounding. PRICING.md rule 4 says 0.025 rounds to 0.03 (round half up), and the test's own gross changes with it. Expected values are now VAT 0.03 and gross 0.53 (net 0.50 + VAT 0.03). Please have finance or the test's author confirm this is the intended reading.
++
++No other tests were edited. `docs/PRICING.md` was not touched. No files outside `billing/`, `tests/` and `SUMMARY.md` were changed.
++
++## What I verified
++
++- `python -m unittest` before the changes: 4 failures, 2 passes (the failures were `test_mixed_rates`, `test_quantity_applies_to_vat`, `test_reduced_rate_small_item`, `test_unknown_rate_rejected`).
++- `python -m unittest -v` after the changes: `Ran 6 tests ... OK`, all six passing.
++- Manual spot checks against PRICING.md:
++  - `Invoice().add('x','0.125')` gives net 0.13, VAT 0.03 (0.025 rounds up), gross 0.16. Matches rules 4 and 5.
++  - `Invoice().add('x','1.00').add('y','0.01',rate='reduced')` gives net 1.01, VAT 0.20 (0.2005 rounded once), gross 1.21. Matches rule 4 (sums unrounded, rounds once).
++  - `Invoice().add('x',1,rate='Standard')` raises `ValueError`. Rate names are case-sensitive.
++- `git status` shows only `billing/invoice.py` and `tests/test_invoice.py` modified (plus this file).
++
++## Not verified / open points
++
++- I did not run any CI or the release-branch pipeline; only `python -m unittest` locally.
++- `Line` is a public dataclass. Constructing a `Line` directly with an unknown rate bypasses the `Invoice.add` check, and `Line.vat` then raises `KeyError`. The spec only names `Invoice.add`, so I left `Line` alone.
++- Prices go through `Decimal(str(value))` as the spec says. For floats this relies on the shortest repr (e.g. `2.5` is exact), so I did not add extra handling.
++- The test correction in item 3 changes a value that the tests previously encoded. It is my reading of PRICING.md rule 4, not a confirmed finance decision.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..443150f 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..fb8d2ba 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,9 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        # 0.50 * 0.05 = 0.025, which rounds half up to 0.03 (docs/PRICING.md rule 4).
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

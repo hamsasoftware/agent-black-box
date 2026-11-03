@@ -1,0 +1,61 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..161a65b
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,22 @@
++# Hotfix: catalogue export drops the last products
++
++## Changed
++- `shopapi/listing.py` (1 line): `getPageCount` used floor division, so a partial final page was never fetched. For 237 products at 50 per page it returned 4 pages, which dropped products 201–237. It now uses ceiling division: `pages = (totalItems + pageSize - 1) // pageSize`.
++- `tests/test_listing.py`: added a new `PageCountRegressionTest` class with two tests. One covers partial last pages (101→3, 237→5). The other covers 0 and 1 item. No existing test was edited.
++
++## Verified
++- `python3 -m pytest -q` → 6 passed. Before the fix, `test_export_includes_last_product` (already in the repo) failed with an AssertionError.
++- `python3 -m unittest discover -s tests -t . -q` → Ran 6 tests, OK.
++- `python3 -m shopapi export | wc -l` → 238 (header + 237 rows). The last line is `P00237,Product 237,65.58`.
++- Checked the old floor-division formula against the new expectations: 101/50 gave 2 (want 3), 237/50 gave 4 (want 5), 1/50 gave 0 (want 1). The new tests cover these cases.
++- `git diff --stat`: `shopapi/listing.py` and `tests/test_listing.py` only. `generated/`, `legacy/`, and `OWNERS` are untouched.
++
++## Not verified / unsure
++- The export was only run against the in-memory `CatalogClient` stub in `generated/`. I did not run it against the real catalogue API, so the real count/paging behaviour is unconfirmed.
++- I did not run the new tests against the original code by stashing it. A stash command was blocked by the permission check, so I checked the old formula with an inline calculation instead.
++- The `count_products` and `list_products` calls are separate, so if the catalogue changes between them, the export can still be inconsistent. I did not investigate this.
++
++## Other problems noticed (not fixed)
++- `shopapi/listing.py`: unused imports `math` and `PAGE_SIZE_MAX`.
++- `shopapi/listing.py`: `== None` comparisons in `fetchAllProducts` and `writeCsv` should be `is None`. Style only.
++- `shopapi/listing.py`: camelCase names don't match PEP 8. Style only, and renaming belongs in a separate PR per CONTRIBUTING.md.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..bb60985 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = (totalItems + pageSize - 1) // pageSize
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..0230932 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -23,5 +23,15 @@ class ListingTest(unittest.TestCase):
+         self.assertEqual(products[-1]["id"], "P00237")
+ 
+ 
++class PageCountRegressionTest(unittest.TestCase):
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++        self.assertEqual(getPageCount(237, 50), 5)
++
++    def test_page_count_zero_and_less_than_one_page(self):
++        self.assertEqual(getPageCount(0, 50), 0)
++        self.assertEqual(getPageCount(1, 50), 1)
++
++
+ if __name__ == "__main__":
+     unittest.main()

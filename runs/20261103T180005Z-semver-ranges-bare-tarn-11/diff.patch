@@ -1,0 +1,319 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..91ce36a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,17 @@
++# Summary: range matching (`satisfies`, `max_satisfying`)
++
++## What changed
++- `depres/ranges.py`: implemented `satisfies(version, range_)` and `max_satisfying(versions, range_)` per `docs/RANGES.md`. Covers `||` unions, primitive comparators (with whitespace after the operator), partial versions and X-ranges, hyphen ranges, tilde and caret ranges, and the prerelease rule. Invalid ranges and versions raise `ValueError`. `max_satisfying` returns the matching item unchanged.
++- `tests/test_ranges_contract.py` (new): table of examples taken from `docs/RANGES.md`, plus invalid-input and `max_satisfying` checks.
++- No existing test or other file was edited.
++
++## What I verified
++- `python -m unittest -v` in the project root: 12 tests, all pass (8 existing in `tests/test_ranges.py`, 4 new). Before this change, the `tests/test_ranges.py` tests failed with `NotImplementedError`.
++- Ad-hoc probe of about 60 version/range pairs drawn from every table in `docs/RANGES.md`; all matched the documented results after I corrected two of my own probe expectations.
++- Invalid-input probes: `1.x.3`, `>=`, `1.2.3 -`, `1.2-beta`, `^`, `x.1`, `a.b` raise `ValueError`; version `1.0` and `nope` raise `ValueError`.
++
++## Not verified / unsure
++- **Empty set and prerelease:** the doc says an empty set (`""`, `*`) matches every version, but also says a prerelease only matches when a comparator names the same release with a prerelease tag. I applied the prerelease rule to all sets, so `*` and `""` do **not** match `2.0.0-rc.1`. This matches npm, but please confirm it is the intended reading.
++- **Lenient parsing I did not check against the spec:** leading zeros in partial versions (`01.x`) are accepted, and a space-separated list with no operators such as `1.2.3 4` is accepted as an AND of two comparators. `~>` and `~ >` are not supported.
++- **Not run:** the resolver and the lockfile checker, which the doc says rely on this module. I only tested the module in isolation.
++- **Not touched:** nothing outside `depres/` and `tests/` needed changing, so no notes for other files.
+diff --git a/depres/ranges.py b/depres/ranges.py
+index 248cdcd..02cf165 100644
+--- a/depres/ranges.py
++++ b/depres/ranges.py
+@@ -1,9 +1,210 @@
++"""npm-style version ranges. See docs/RANGES.md for the contract."""
++
++import operator
++import re
++
+ from .version import Version
+ 
++_OPERATORS = {
++    "<": operator.lt,
++    "<=": operator.le,
++    ">": operator.gt,
++    ">=": operator.ge,
++    "=": operator.eq,
++}
++
++# Operators that may be separated from their version by whitespace.
++_PREFIX = ("<=", ">=", "<", ">", "=", "~", "^")
++
++_COMPARATOR = re.compile(r"^(<=|>=|<|>|=|~|\^)?(.*)$")
++
++_PARTIAL = re.compile(
++    r"^v?(\d+|[xX*])(?:\.(\d+|[xX*]))?(?:\.(\d+|[xX*]))?(?:\+[0-9A-Za-z.-]+)?$"
++)
++
++_WILDCARDS = ("x", "X", "*")
++
++
++def _parse_version_body(body):
++    """Return (numbers, count, full) where count is the number of leading
++    specified numeric positions (0-3) and full is a Version when count == 3."""
++    try:
++        full = Version.parse(body)
++    except ValueError:
++        full = None
++    if full is not None:
++        return (full.major, full.minor, full.patch), 3, full
++
++    match = _PARTIAL.match(body)
++    if not match:
++        raise ValueError(f"invalid version in range: {body!r}")
++    numbers = []
++    for part in match.groups():
++        if part is None or part in _WILDCARDS:
++            numbers.append(None)
++        else:
++            numbers.append(int(part))
++    count = 3
++    for index, number in enumerate(numbers):
++        if number is None:
++            count = index
++            break
++    if any(number is not None for number in numbers[count:]):
++        raise ValueError(f"numbers may not follow a wildcard: {body!r}")
++    numbers = [0 if number is None else number for number in numbers]
++    return tuple(numbers), count, None
++
++
++def _comparator(text):
++    """Expand one comparator (operator and version, no spaces) into bounds.
++
++    Returns a list of (op, Version) pairs; ("never", None) marks an
++    unsatisfiable comparator. An empty list matches everything.
++    """
++    match = _COMPARATOR.match(text)
++    op = match.group(1) or "="
++    body = match.group(2)
++    if not body:
++        raise ValueError(f"missing version in range: {text!r}")
++    (major, minor, patch), count, full = _parse_version_body(body)
++    never = [("never", None)]
++
++    if op in ("~", "^"):
++        if count == 0:
++            return []
++        if full is not None:
++            low = full
++            if op == "~":
++                high = Version(major, minor + 1, 0)
++            elif major > 0:
++                high = Version(major + 1, 0, 0)
++            elif minor > 0:
++                high = Version(0, minor + 1, 0)
++            else:
++                high = Version(0, 0, patch + 1)
++            return [(">=", low), ("<", high)]
++        low = Version(major, minor if count == 2 else 0, 0)
++        if count == 1:
++            high = Version(major + 1, 0, 0)  # ~1, ^1, ^0
++        elif op == "~":
++            high = Version(major, minor + 1, 0)  # ~1.2
++        elif major > 0:
++            high = Version(major + 1, 0, 0)  # ^1.2
++        else:
++            high = Version(0, minor + 1, 0)  # ^0.2
++        return [(">=", low), ("<", high)]
++
++    if count == 0:
++        return never if op in ("<", ">") else []
++
++    if full is not None:
++        return [(op, full)]
++
++    base = Version(major, minor if count == 2 else 0, 0)
++    up = Version(major + 1, 0, 0) if count == 1 else Version(major, minor + 1, 0)
++    if op == "=":
++        return [(">=", base), ("<", up)]
++    if op == ">=":
++        return [(">=", base)]
++    if op == "<":
++        return [("<", base)]
++    if op == "<=":
++        return [("<", up)]
++    if op == ">":
++        return [(">=", up)]
++    raise AssertionError(op)  # pragma: no cover
++
++
++def _hyphen(low_text, high_text):
++    """Expand `A - B` into bounds."""
++    (lo_nums, lo_count, lo_full) = _parse_version_body(low_text)
++    (hi_nums, hi_count, hi_full) = _parse_version_body(high_text)
++    bounds = []
++    if lo_count > 0:
++        if lo_full is not None:
++            bounds.append((">=", lo_full))
++        else:
++            bounds.append((">=", Version(lo_nums[0], lo_nums[1] if lo_count >= 2 else 0, 0)))
++    if hi_count == 3:
++        bounds.append(("<=", hi_full))
++    elif hi_count == 2:
++        bounds.append(("<", Version(hi_nums[0], hi_nums[1] + 1, 0)))
++    elif hi_count == 1:
++        bounds.append(("<", Version(hi_nums[0] + 1, 0, 0)))
++    return bounds
++
++
++def _parse_set(text):
++    """Parse one comparator set into a list of (op, Version) bounds."""
++    tokens = text.split()
++    bounds = []
++    i = 0
++    while i < len(tokens):
++        token = tokens[i]
++        if i + 2 < len(tokens) and tokens[i + 1] == "-":
++            bounds.extend(_hyphen(token, tokens[i + 2]))
++            i += 3
++            continue
++        if token in _PREFIX:
++            if i + 1 >= len(tokens):
++                raise ValueError(f"operator without version in range: {text!r}")
++            i += 1
++            token = token + tokens[i]
++        bounds.extend(_comparator(token))
++        i += 1
++    return bounds
++
++
++def _parse_range(range_):
++    """Return the range as a list of comparator sets."""
++    if not isinstance(range_, str):
++        raise ValueError(f"range must be a string: {range_!r}")
++    return [_parse_set(part) for part in range_.split("||")]
++
++
++def _as_version(version):
++    if isinstance(version, Version):
++        return version
++    if not isinstance(version, str):
++        raise ValueError(f"invalid version: {version!r}")
++    return Version.parse(version)
++
++
++def _set_matches(version, bounds):
++    for op, bound in bounds:
++        if op == "never":
++            return False
++        if not _OPERATORS[op](version, bound):
++            return False
++    if version.prerelease:
++        # A prerelease only matches if some comparator names the same
++        # MAJOR.MINOR.PATCH with a prerelease tag.
++        return any(
++            bound.prerelease and bound.release == version.release
++            for _, bound in bounds
++        )
++    return True
++
++
++def _matches(version, sets):
++    return any(_set_matches(version, bounds) for bounds in sets)
++
+ 
+ def satisfies(version, range_):
+-    raise NotImplementedError
++    """Return True if `version` satisfies the npm-style `range_`."""
++    parsed = _as_version(version)
++    return _matches(parsed, _parse_range(range_))
+ 
+ 
+ def max_satisfying(versions, range_):
+-    raise NotImplementedError
++    """Return the highest item of `versions` satisfying `range_`, as given, or None."""
++    sets = _parse_range(range_)
++    best_item = None
++    best_version = None
++    for item in versions:
++        parsed = _as_version(item)
++        if not _matches(parsed, sets):
++            continue
++        if best_version is None or parsed > best_version:
++            best_item, best_version = item, parsed
++    return best_item
+diff --git a/tests/test_ranges_contract.py b/tests/test_ranges_contract.py
+new file mode 100644
+index 0000000..63dd8e9
+--- /dev/null
++++ b/tests/test_ranges_contract.py
+@@ -0,0 +1,73 @@
++import unittest
++
++from depres import max_satisfying, satisfies
++
++
++class RangeContractTest(unittest.TestCase):
++    """Examples taken directly from docs/RANGES.md."""
++
++    CASES = [
++        ("1.0.0", "*", True),
++        ("1.0.0", "", True),
++        ("2.0.0", "1.x", False),
++        ("1.2.9", "1.2.x", True),
++        ("1.3.0", "1.2", False),
++        ("2.0.0", ">1", True),
++        ("1.9.9", ">1", False),
++        ("1.3.0", ">1.2", True),
++        ("1.2.9", ">1.2", False),
++        ("1.2.0", ">=1.2", True),
++        ("1.2.0", "<1.2", False),
++        ("2.0.0", "<=1", False),
++        ("1.9.0", "<=1", True),
++        ("1.3.0", "<=1.2", False),
++        ("1.2.7", "<=1.2", True),
++        ("1.3.0", "=1.2", False),
++        ("1.2.3", "1.2.3 - 2.3", True),
++        ("2.3.9", "1.2.3 - 2.3", True),
++        ("2.4.0", "1.2.3 - 2.3", False),
++        ("3.0.0", "1.2.3 - 2", False),
++        ("1.3.0", "~1.2.3", False),
++        ("1.2.2", "~1.2.3", False),
++        ("1.3.0", "~1.2", False),
++        ("2.0.0", "~1", False),
++        ("1.3.0", "~1.2.3-beta.2", False),
++        ("2.0.0", "^1.2.3", False),
++        ("0.3.0", "^0.2.3", False),
++        ("0.0.4", "^0.0.3", False),
++        ("2.0.0", "^1.2.x", False),
++        ("0.3.0", "^0.2", False),
++        ("0.1.0", "^0.0.x", False),
++        ("1.0.0", "^0.x", False),
++        ("1.5.0", "^1", True),
++        ("1.2.3", "v1.2.3", True),
++        ("1.2.3", ">= 1.2.0", True),
++        ("1.2.3", "1.2.3+build.5", True),
++        ("1.2.4-alpha.1", ">=1.2.3-alpha.1 <1.3.0", False),
++        ("1.2.3-alpha.7", ">=1.2.3-alpha.1 <1.3.0", True),
++        ("1.5.0-beta", "^1.0.0", False),
++        ("2.0.0-rc.1", "^1.0.0", False),
++        ("1.2.3", "<1.2.3 || >=1.2.3 <=1.2.3", True),
++    ]
++
++    def test_contract_examples(self):
++        for version, range_, expected in self.CASES:
++            with self.subTest(version=version, range=range_):
++                self.assertIs(satisfies(version, range_), expected)
++
++    def test_invalid_ranges_raise(self):
++        for range_ in ["1.x.3", "1.2-beta", "^", "x.1", "a.b"]:
++            with self.subTest(range=range_):
++                with self.assertRaises(ValueError):
++                    satisfies("1.0.0", range_)
++
++    def test_invalid_version_raises(self):
++        with self.assertRaises(ValueError):
++            satisfies("1.0", "*")
++
++    def test_max_satisfying_returns_item_as_given(self):
++        self.assertEqual(max_satisfying(["v1.2.0", "1.2.1+b"], "~1.2"), "1.2.1+b")
++
++
++if __name__ == "__main__":
++    unittest.main()

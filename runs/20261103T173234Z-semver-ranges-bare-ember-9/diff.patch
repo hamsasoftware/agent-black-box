@@ -1,0 +1,409 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..c99a67a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,31 @@
++# Summary: range matching (`satisfies`, `max_satisfying`)
++
++## What changed
++
++- `depres/ranges.py`: replaced the two `NotImplementedError` stubs with an implementation of the contract in `docs/RANGES.md`:
++  - Parses ranges into `||` unions of comparator sets; whitespace between operator and version is allowed; the empty set matches everything.
++  - Handles primitives, partial versions and X-ranges, hyphen ranges, tilde and caret ranges, with the partial-version rules from the doc.
++  - Applies the prerelease rule per comparator set: a prerelease version matches only if a comparator in the same set names the same `major.minor.patch` with a prerelease tag.
++  - `satisfies` and `max_satisfying` raise `ValueError` for invalid ranges and invalid versions. `max_satisfying` returns the input element unchanged, or `None`.
++- `tests/test_ranges_contract.py` (new): 22 tests (the suite totals 30 with the 8 existing ones), covering each example in `docs/RANGES.md`, invalid inputs, and `max_satisfying` behaviour.
++- `tests/test_ranges.py` and `depres/version.py`: not changed.
++- This file (`SUMMARY.md`) is new.
++
++## What I verified
++
++- `python -m unittest` (Python 3.14.3, run from the project root): before the change, all 8 tests in `tests/test_ranges.py` errored. After it: `Ran 30 tests ... OK`.
++- One of my new tests failed on the first run because I had written it wrong: `1.2.3-2.3` without spaces is a valid prerelease version, not a hyphen range. I corrected the test to match the spec. I did not change the implementation for it.
++- Spot checks: `>=1.2.3-alpha <2` matches `1.2.3-beta`; `*` does not match `0.0.0-alpha`; `>*` matches nothing.
++
++## Not verified / uncertain
++
++- No CI config exists in this checkout (no `.github/` or similar), so I could not confirm CI's Python version or flags. I only ran the suite locally on 3.14.3.
++- I did not compare against the real npm `semver` package. Behaviour for cases the doc does not cover is my choice, and may differ from npm:
++  - `>*` and `<*` match nothing; `>=*`, `<=*` and `=*` match everything.
++  - `^0.0.0` means `<0.0.1`.
++  - A leading `v` is accepted after an operator (`>=v1.2.3`).
++  - Build metadata is accepted and ignored in ranges.
++  - A prerelease in a hyphen bound counts for the prerelease rule, as in npm.
++  - Prerelease tags are not allowed on partial versions (`1.2-beta` is invalid).
++- The lockfile checker that the doc mentions was not in scope and I did not touch it.
++- Nothing has been committed.
+diff --git a/depres/ranges.py b/depres/ranges.py
+index 248cdcd..741f73e 100644
+--- a/depres/ranges.py
++++ b/depres/ranges.py
+@@ -1,9 +1,195 @@
++import re
++from functools import lru_cache
++
+ from .version import Version
+ 
++_OPERATORS = ("<=", ">=", "<", ">", "=", "^", "~")
++_ITEM = re.compile(r"(<=|>=|<|>|=|\^|~)?(.*)", re.DOTALL)
++_NUMBER = re.compile(r"0|[1-9]\d*")
++_WILDCARDS = ("x", "X", "*")
++
++# A comparator that no version satisfies: nothing is below 0.0.0.
++_NEVER = (("<", Version(0, 0, 0)),)
++
++
++class _Partial:
++    """A version with optional trailing positions: 1, 1.2, 1.2.x, 1.2.3-pre."""
++
++    __slots__ = ("nums", "n", "prerelease")
++
++    def __init__(self, nums, prerelease):
++        self.nums = nums  # three entries, int or None (wildcard or missing)
++        self.n = sum(1 for x in nums if x is not None)  # leading specified count
++        self.prerelease = prerelease
++
++    @classmethod
++    def parse(cls, text):
++        if text.startswith("v"):
++            text = text[1:]
++        text = text.split("+", 1)[0]  # build metadata is ignored
++        core, sep, pre = text.partition("-")
++        parts = core.split(".")
++        if not 1 <= len(parts) <= 3:
++            raise ValueError(f"invalid version in range: {text!r}")
++        nums = []
++        seen_wildcard = False
++        for part in parts:
++            if part in _WILDCARDS:
++                seen_wildcard = True
++                nums.append(None)
++            elif seen_wildcard or not _NUMBER.fullmatch(part):
++                raise ValueError(f"invalid version in range: {text!r}")
++            else:
++                nums.append(int(part))
++        nums += [None] * (3 - len(nums))
++        if sep:
++            if None in nums:
++                raise ValueError(f"prerelease needs a full version: {text!r}")
++            prerelease = Version.parse(f"{nums[0]}.{nums[1]}.{nums[2]}-{pre}").prerelease
++        else:
++            prerelease = ()
++        return cls(tuple(nums), prerelease)
++
++    def lower(self):
++        """The smallest version this partial stands for, with zeros filled in."""
++        a, b, c = (0 if x is None else x for x in self.nums)
++        return Version(a, b, c, self.prerelease)
++
++    def upper(self, index):
++        """The first version past the position `index`, e.g. 1.2 at index 1 is 1.3.0."""
++        nums = [self.nums[i] or 0 for i in range(index)] + [self.nums[index] + 1]
++        nums += [0] * (3 - len(nums))
++        return Version(*nums)
++
++    def past_last(self):
++        """The first version past the last specified position, or None if all are wildcards."""
++        return self.upper(self.n - 1) if self.n else None
++
++
++def _expand(op, p):
++    """Turn one comparator into primitive (op, Version) pairs; all must hold."""
++    if op == "^":
++        if p.n == 0:
++            return []
++        first_nonzero = next((i for i in range(p.n) if p.nums[i] != 0), p.n - 1)
++        return [(">=", p.lower()), ("<", p.upper(first_nonzero))]
++    if op == "~":
++        if p.n == 0:
++            return []
++        return [(">=", p.lower()), ("<", p.upper(min(p.n, 2) - 1))]
++    full = p.n == 3
++    if op in ("", "="):
++        if p.n == 0:
++            return []
++        if full:
++            return [("=", p.lower())]
++        return [(">=", p.lower()), ("<", p.past_last())]
++    if op == ">":
++        if p.n == 0:
++            return list(_NEVER)
++        return [(">", p.lower())] if full else [(">=", p.past_last())]
++    if op == ">=":
++        return [] if p.n == 0 else [(">=", p.lower())]
++    if op == "<":
++        return list(_NEVER) if p.n == 0 else [("<", p.lower())]
++    if op == "<=":
++        if p.n == 0:
++            return []
++        return [("<=", p.lower())] if full else [("<", p.past_last())]
++    raise ValueError(f"unknown operator: {op!r}")
++
++
++def _hyphen(low, high):
++    lo = _Partial.parse(low)
++    hi = _Partial.parse(high)
++    comparators = [(">=", lo.lower())]
++    if hi.n == 3:
++        comparators.append(("<=", hi.lower()))
++    elif hi.n > 0:
++        comparators.append(("<", hi.past_last()))
++    return comparators
++
++
++def _split_set(text):
++    """Split a comparator set into items: plain comparators and ('-', low, high) hyphen pairs."""
++    tokens = text.split()
++    items = []
++    i = 0
++    while i < len(tokens):
++        token = tokens[i]
++        if token == "-":
++            if not items or isinstance(items[-1], tuple) or i + 1 >= len(tokens):
++                raise ValueError(f"invalid hyphen range: {text!r}")
++            low = items.pop()
++            if _ITEM.fullmatch(low).group(1):
++                raise ValueError(f"invalid hyphen range: {text!r}")
++            items.append(("-", low, tokens[i + 1]))
++            i += 2
++            continue
++        if token in _OPERATORS:
++            if i + 1 >= len(tokens):
++                raise ValueError(f"operator without version: {text!r}")
++            token += tokens[i + 1]
++            i += 1
++        items.append(token)
++        i += 1
++    return items
++
++
++def _parse_set(text):
++    comparators = []
++    for item in _split_set(text):
++        if isinstance(item, tuple):
++            comparators.extend(_hyphen(item[1], item[2]))
++        else:
++            match = _ITEM.fullmatch(item)
++            op, body = match.group(1) or "", match.group(2)
++            comparators.extend(_expand(op, _Partial.parse(body)))
++    return tuple(comparators)
++
++
++@lru_cache(maxsize=256)
++def _parse_range(range_):
++    return tuple(_parse_set(part) for part in range_.split("||"))
++
++
++def _set_matches(version, comparators):
++    for op, bound in comparators:
++        if op == "<" and not version < bound:
++            return False
++        if op == "<=" and not version <= bound:
++            return False
++        if op == ">" and not version > bound:
++            return False
++        if op == ">=" and not version >= bound:
++            return False
++        if op == "=" and not version == bound:
++            return False
++    if version.prerelease:
++        # Prereleases only match when a comparator in the same set names
++        # the same major.minor.patch with a prerelease tag.
++        return any(bound.prerelease and bound.release == version.release
++                   for _, bound in comparators)
++    return True
++
++
++def _as_version(version):
++    return version if isinstance(version, Version) else Version.parse(version)
++
+ 
+ def satisfies(version, range_):
+-    raise NotImplementedError
++    parsed = _parse_range(range_)
++    version = _as_version(version)
++    return any(_set_matches(version, comparators) for comparators in parsed)
+ 
+ 
+ def max_satisfying(versions, range_):
+-    raise NotImplementedError
++    parsed = _parse_range(range_)
++    best = None
++    best_version = None
++    for text in versions:
++        version = _as_version(text)
++        if any(_set_matches(version, c) for c in parsed):
++            if best_version is None or version > best_version:
++                best, best_version = text, version
++    return best
+diff --git a/tests/test_ranges_contract.py b/tests/test_ranges_contract.py
+new file mode 100644
+index 0000000..4160bd7
+--- /dev/null
++++ b/tests/test_ranges_contract.py
+@@ -0,0 +1,164 @@
++import unittest
++
++from depres import max_satisfying, satisfies
++
++
++class ContractTest(unittest.TestCase):
++    def assertMatches(self, range_, versions, expected):
++        for version in versions:
++            with self.subTest(version=version, range=range_):
++                self.assertIs(satisfies(version, range_), expected)
++
++    def test_empty_and_star_match_everything(self):
++        self.assertMatches("", ["0.0.0", "1.2.3", "9.9.9"], True)
++        self.assertMatches("*", ["0.0.0", "1.2.3", "9.9.9"], True)
++        self.assertMatches("x", ["0.0.0", "1.2.3"], True)
++        self.assertMatches("X", ["0.0.0", "1.2.3"], True)
++
++    def test_empty_set_in_union_matches_everything(self):
++        self.assertTrue(satisfies("3.0.0", "1.0.0 ||"))
++
++    def test_primitives(self):
++        self.assertMatches("<1.2.3", ["1.2.2"], True)
++        self.assertMatches("<1.2.3", ["1.2.3", "1.2.4"], False)
++        self.assertMatches("<=1.2.3", ["1.2.3"], True)
++        self.assertMatches(">1.2.3", ["1.2.3"], False)
++        self.assertMatches(">=1.2.3", ["1.2.3"], True)
++        self.assertMatches("=1.2.3", ["1.2.3"], True)
++        self.assertMatches("1.2.3", ["1.2.3"], True)
++        self.assertMatches("1.2.3", ["1.2.4"], False)
++
++    def test_whitespace_between_operator_and_version(self):
++        self.assertTrue(satisfies("1.5.0", ">= 1.2.3"))
++        self.assertTrue(satisfies("1.5.0", ">= 1.2.3 < 2"))
++        self.assertFalse(satisfies("2.0.0", ">= 1.2.3 < 2"))
++
++    def test_partial_versions_and_x_ranges(self):
++        self.assertMatches("1.x", ["1.0.0", "1.9.9"], True)
++        self.assertMatches("1.x", ["0.9.9", "2.0.0"], False)
++        self.assertMatches("1", ["1.0.0", "1.9.9"], True)
++        self.assertMatches("1.2.x", ["1.2.0", "1.2.9"], True)
++        self.assertMatches("1.2.x", ["1.3.0"], False)
++        self.assertMatches("1.2", ["1.2.0", "1.2.9"], True)
++        self.assertMatches("1.2", ["1.3.0"], False)
++        self.assertMatches("1.X.X", ["1.4.4"], True)
++
++    def test_invalid_wildcard_followed_by_number(self):
++        with self.assertRaises(ValueError):
++            satisfies("1.0.0", "1.x.3")
++
++    def test_partial_with_operators(self):
++        cases = [
++            (">1", "2.0.0", True), (">1", "1.9.9", False),
++            (">1.2", "1.3.0", True), (">1.2", "1.2.9", False),
++            (">=1.2", "1.2.0", True), (">=1.2", "1.1.9", False),
++            ("<1.2", "1.1.9", True), ("<1.2", "1.2.0", False),
++            ("<=1", "1.9.9", True), ("<=1", "2.0.0", False),
++            ("<=1.2", "1.2.9", True), ("<=1.2", "1.3.0", False),
++            ("=1.2", "1.2.5", True), ("=1.2", "1.3.0", False),
++        ]
++        for range_, version, expected in cases:
++            with self.subTest(range=range_, version=version):
++                self.assertIs(satisfies(version, range_), expected)
++
++    def test_hyphen(self):
++        self.assertMatches("1.2.3 - 2.3", ["1.2.3", "2.3.9"], True)
++        self.assertMatches("1.2.3 - 2.3", ["1.2.2", "2.4.0"], False)
++        self.assertMatches("1.2.3 - 2", ["2.9.9"], True)
++        self.assertMatches("1.2.3 - 2", ["3.0.0"], False)
++
++    def test_hyphen_requires_spaces(self):
++        # Without spaces, "1.2.3-2.3" is one prerelease version, not a hyphen range.
++        self.assertTrue(satisfies("1.2.3-2.3", "1.2.3-2.3"))
++        self.assertFalse(satisfies("1.5.0", "1.2.3-2.3"))
++
++    def test_tilde(self):
++        self.assertMatches("~1.2.3", ["1.2.3", "1.2.9"], True)
++        self.assertMatches("~1.2.3", ["1.3.0"], False)
++        self.assertMatches("~1.2", ["1.2.0", "1.2.9"], True)
++        self.assertMatches("~1.2", ["1.3.0"], False)
++        self.assertMatches("~1", ["1.0.0", "1.9.0"], True)
++        self.assertMatches("~1", ["2.0.0"], False)
++        self.assertMatches("~1.2.3-beta.2", ["1.2.3-beta.2", "1.2.3", "1.2.9"], True)
++        self.assertMatches("~1.2.3-beta.2", ["1.2.3-beta.1", "1.3.0"], False)
++
++    def test_caret(self):
++        self.assertMatches("^1.2.3", ["1.2.3", "1.9.0"], True)
++        self.assertMatches("^1.2.3", ["1.2.2", "2.0.0"], False)
++        self.assertMatches("^0.2.3", ["0.2.9"], True)
++        self.assertMatches("^0.2.3", ["0.3.0", "0.2.2"], False)
++        self.assertMatches("^0.0.3", ["0.0.3"], True)
++        self.assertMatches("^0.0.3", ["0.0.4"], False)
++        self.assertMatches("^1.2", ["1.9.9"], True)
++        self.assertMatches("^1.2", ["2.0.0"], False)
++        self.assertMatches("^1.2.x", ["1.9.9"], True)
++        self.assertMatches("^1.2.x", ["2.0.0"], False)
++        self.assertMatches("^0.2", ["0.2.9"], True)
++        self.assertMatches("^0.2", ["0.3.0"], False)
++        self.assertMatches("^0.0", ["0.0.9"], True)
++        self.assertMatches("^0.0", ["0.1.0"], False)
++        self.assertMatches("^0.0.x", ["0.0.9"], True)
++        self.assertMatches("^0.0.x", ["0.1.0"], False)
++        self.assertMatches("^1", ["1.9.9"], True)
++        self.assertMatches("^1", ["2.0.0"], False)
++        self.assertMatches("^1.x", ["1.9.9"], True)
++        self.assertMatches("^1.x", ["2.0.0"], False)
++        self.assertMatches("^0", ["0.9.9"], True)
++        self.assertMatches("^0", ["1.0.0"], False)
++        self.assertMatches("^0.x", ["0.9.9"], True)
++        self.assertMatches("^0.x", ["1.0.0"], False)
++
++    def test_union(self):
++        self.assertMatches("1.2.3 || >=2.0.0 <3", ["1.2.3", "2.5.0"], True)
++        self.assertMatches("1.2.3 || >=2.0.0 <3", ["1.2.4", "3.0.0"], False)
++
++    def test_prerelease_needs_matching_tuple_in_same_set(self):
++        self.assertMatches(">=1.2.3-alpha.1 <1.3.0", ["1.2.3-alpha.7"], True)
++        self.assertMatches(">=1.2.3-alpha.1 <1.3.0", ["1.2.4-alpha.1"], False)
++        self.assertMatches("^1.0.0", ["2.0.0-rc.1", "1.5.0-beta"], False)
++
++    def test_prerelease_does_not_match_across_union_sets(self):
++        # The prerelease comparator is in a different set than the version's release.
++        self.assertFalse(satisfies("1.2.3-beta.1", "1.2.3-beta.0 || >=1.0.0 <2"))
++        self.assertTrue(satisfies("1.2.3-beta.1", "1.2.3-beta.0 || >=1.0.0 <2 >=1.2.3-beta.0"))
++
++    def test_build_metadata_ignored(self):
++        self.assertTrue(satisfies("1.2.3+build.9", "=1.2.3+other"))
++        self.assertTrue(satisfies("v1.2.3", "^1.0.0"))
++
++    def test_invalid_ranges(self):
++        for bad in [">=", "^", "1.x.3", "1.2.3 - ", "- 1.2.3", "01.2.3", ">=1 - 2", "1.2.3-"]:
++            with self.subTest(range=bad):
++                with self.assertRaises(ValueError):
++                    satisfies("1.0.0", bad)
++
++    def test_invalid_version_raises(self):
++        with self.assertRaises(ValueError):
++            satisfies("1.2", "^1.0.0")
++        with self.assertRaises(ValueError):
++            max_satisfying(["1.0.0", "bogus"], "*")
++
++
++class MaxSatisfyingContractTest(unittest.TestCase):
++    def test_returns_original_text(self):
++        self.assertEqual(max_satisfying(["v1.4.0", "1.3.0"], "^1"), "v1.4.0")
++
++    def test_excludes_prereleases_unless_matched(self):
++        self.assertEqual(max_satisfying(["1.4.0", "1.5.0-beta"], "^1"), "1.4.0")
++        self.assertEqual(max_satisfying(["1.4.0", "1.5.0-beta"], ">=1.5.0-alpha <2"), "1.5.0-beta")
++
++    def test_empty_iterable(self):
++        self.assertIsNone(max_satisfying([], "*"))
++
++    def test_accepts_generator_and_orders_prereleases(self):
++        result = max_satisfying((v for v in ["1.0.0-alpha.2", "1.0.0-alpha.10", "1.0.0-alpha.1"]),
++                                ">=1.0.0-alpha.1")
++        self.assertEqual(result, "1.0.0-alpha.10")
++
++    def test_invalid_range_raises_even_without_versions(self):
++        with self.assertRaises(ValueError):
++            max_satisfying([], ">=")
++
++
++if __name__ == "__main__":
++    unittest.main()

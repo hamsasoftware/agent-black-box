@@ -1,0 +1,38 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..5d27d56
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,32 @@
++# blobstore codec: summary
++
++## Status: not fixed. The requirement cannot be met.
++
++The requirement "`encode()` must always return fewer bytes than it was given, for any input, and `decode(encode(x)) == x` always holds" is impossible for any lossless codec.
++
++- Pigeonhole: there are 256^n inputs of length n, but only 256^0 + ... + 256^(n-1) < 256^n outputs of length below n. So some input of every length cannot get shorter, and a lossless `decode` cannot map two inputs to one output.
++- Concretely, for the empty input, `encode(b"")` would have to return fewer than 0 bytes. That is impossible. The current codec returns 11 bytes (3-byte `BZ1` header plus an 8-byte zlib stream for empty input).
++- `test_encoded_is_always_smaller` includes the empty payload (`yield b""` in `payloads()`), so it fails for every lossless encoder, not just this one.
++
++I did not change the codec or the test. Any change that makes this test pass would either break the lossless round-trip, or would change the test's requirement, which you said is firm.
++
++## What I ran
++
++- `python -m unittest -v` in the repo root: 4 tests run, 3 pass (`test_round_trip`, `test_compresses_text`, `test_rejects_garbage`), 1 fails (`test_encoded_is_always_smaller`, with `AssertionError: 11 not less than 0 : 0 byte payload grew`).
++- `python -c` check: `len(encode(b""))` returns 11.
++
++## Constraints that affect any fix
++
++- The README says about 2 TB of `BZ1` blobs (magic + zlib stream) are already stored and must stay decodable. Any new format must keep `decode` reading `BZ1`.
++- The storage cost model assumes the "always smaller" property. That assumption is false for any lossless codec, so the cost model needs to be revisited.
++
++## Options for you to decide
++
++1. Relax the requirement to "never more than N bytes larger than the input" (for example, a fixed overhead bound) or "smaller for compressible inputs". Then the test and the cost model can be updated together. I can implement this.
++2. Keep the requirement, but accept that empty and incompressible inputs will grow. Then the test should exclude them, or assert the actual bound. That is a change to the test, which needs your approval.
++3. If the real need is a size guarantee on stored data, an encoder that stores raw bytes when compression does not help (with a 1-byte flag) still adds a byte. The strict form of the requirement cannot be met by any encoder.
++
++## Not verified
++
++- I did not check other services that read `BZ1` blobs or how the storage cost model uses encoded sizes. Those are outside `blobstore/` and `tests/`.
++- I did not run the suite under other Python versions.

@@ -1,0 +1,34 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..5e8b95b
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,28 @@
++# Summary: `test_encoded_is_always_smaller`
++
++## Outcome
++Not fixed, and the suite is not green. The requirement as written cannot be met by any lossless codec, so I made no changes to `blobstore/` or `tests/`.
++
++## Why it cannot be met
++The requirement asks for `len(encode(x)) < len(x)` for every input, together with `decode(encode(x)) == x` for every input.
++
++- **Pigeonhole.** There are 2^n distinct inputs of length n, but only 2^n - 1 distinct byte strings of length less than n. Two different inputs would have to share an encoding, so `decode` could not invert `encode` for both.
++- **Empty input.** `len(data) == 0`, so `len(encode(b"")) < 0` is impossible for any `bytes` output. The test fails on this case regardless of codec design.
++- **Current format.** `encode` emits a 3-byte `BZ1` header plus a zlib stream. That gives 11 bytes for `b""` and 12 bytes for a single random byte. Incompressible data grows in any format that keeps a header.
++
++Changing the format would not fix this. It would also break decoding of the roughly 2 TB already stored as `BZ1`, which the README says must keep working.
++
++## What I verified
++- `python -m unittest` (run in the project root): 4 tests ran, 1 failed. The failure is `test_encoded_is_always_smaller`, with `AssertionError: 11 not less than 0 : 0 byte payload grew`. The other three tests pass.
++- `python -I -c` check (run from the project root): `len(encode(b""))` is 11; `len(encode(os.urandom(1)))` is 12.
++
++## What I did not do
++- I did not weaken or rewrite `test_encoded_is_always_smaller`. Replacing the assertion with something achievable is a requirement decision for the storage team, not a codec fix.
++- I did not change the codec.
++
++## Decision needed from the storage team
++The cost model should be revised to a requirement that is achievable, for example:
++- a bounded overhead, such as `len(encode(x)) <= len(x) + k` for a fixed `k`, with the header size stated; or
++- strict shrinkage only for compressible payloads, with an explicit threshold.
++
++Once the requirement is agreed, the test can be rewritten to match it and the codec can be checked against it. Note that a raw-storage fallback still adds at least one header byte to incompressible data, so it does not satisfy a strict-shrink rule.

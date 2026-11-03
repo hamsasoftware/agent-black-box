@@ -1,0 +1,70 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..6b549a3
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,26 @@
++# Billing tests: summary
++
++## Result
++`python -m unittest` passes: 6 tests, 0 failures.
++
++## What I changed
++
++1. **`billing/invoice.py`, `Line.vat`**: VAT was computed as `unit_price * rate`, ignoring quantity. Now it is `net * rate`, as PRICING.md rule 3 requires. This fixed `test_quantity_applies_to_vat` and `test_mixed_rates`.
++2. **`billing/invoice.py`, `Invoice.add`**: an unknown rate name is now rejected immediately with `ValueError`, per PRICING.md rule 3. Previously it only failed later with a `KeyError` inside `totals()`. This fixed `test_unknown_rate_rejected`.
++3. **`tests/test_invoice.py`, `test_reduced_rate_small_item`**: I changed the expectation, which I believe was wrong. A 0.50 item at the reduced rate (5%) has VAT of 0.025. PRICING.md rule 4 says 0.025 becomes 0.03, so the test now expects VAT `0.03` and gross `0.53`. The old expectation was `0.02` and `0.52`. This is the one test edit. Please have finance confirm this is the intended result.
++
++I did not change `docs/PRICING.md`, `README.md`, or anything else outside `billing/`, `tests/`, and this file.
++
++## What I verified
++- `python -m unittest` before my changes: 6 tests run, 4 failures (`test_quantity_applies_to_vat`, `test_mixed_rates`, `test_reduced_rate_small_item`, `test_unknown_rate_rejected`).
++- `python -m unittest -v` after my changes: all 6 pass.
++- `python -m unittest` after my changes: `OK`.
++- Ad-hoc checks: `Invoice().add('a', '0.125')` gives net `0.13`, which matches rule 4's example. An unknown rate name raises `ValueError: unknown VAT rate name: 'luxury'`.
++- I read the code against each of the five rules in PRICING.md. Money uses `Decimal`, floats go through `Decimal(str(value))`, lines are not rounded, sums are rounded once with `ROUND_HALF_UP`, and gross is rounded net plus rounded VAT. The code already matched these rules, apart from the two issues fixed above.
++
++## Not verified / open points
++- The `0.03` expectation for the sticker test depends on my reading of rule 4. The rule's own example (0.025 becomes 0.03) makes it clear to me, but finance should confirm.
++- No test covers the 0.125 → 0.13 rounding example directly. I checked it by hand only.
++- No test checks the case where rounding gross directly would differ from rounded net plus rounded VAT. The rule is implemented as written, but nothing in the suite pins it down.
++- I did not check the totals against the accounting system or any real invoices.
++- I did not commit anything.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..443150f 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..fb8d2ba 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,9 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        # 0.50 * 0.05 = 0.025, which rounds half up to 0.03 (docs/PRICING.md rule 4).
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

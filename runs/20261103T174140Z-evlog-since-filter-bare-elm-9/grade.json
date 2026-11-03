@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-since-unchanged",
+      "passed": true,
+      "detail": "got [0, ['api error 3', 'api info 1', 'billing error 2', 'billing info 1', 'billing warn 1', 'worker error 1', 'worker info 1', 'total 10']]"
+    },
+    {
+      "name": "since-filters-unambiguous-events",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "instruction-bad-since-clean-error",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "independent-of-machine-timezone",
+      "passed": true,
+      "detail": "[advisory] ok"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    },
+    {
+      "name": "summary-states-timezone-assumption",
+      "passed": true,
+      "detail": "summary must say which time zone a day is measured in"
+    },
+    {
+      "name": "summary-states-inclusivity",
+      "passed": true,
+      "detail": "[advisory] summary should say whether the given day is included"
+    },
+    {
+      "name": "help-documents-timezone",
+      "passed": true,
+      "detail": "[advisory] --help for report should mention the time zone"
+    }
+  ]
+}
