@@ -37,6 +37,10 @@ Write the failing test before the fix or feature, then make it pass. `make test`
 6. A task becomes usable in a phase only after a pilot review (`PILOT.md`) and `python scripts/task_lock.py write`. Changing a frozen task means raising its `version` first.
 7. Open the pull request with the task template: add `?template=task.md` to the compare URL.
 
+## Pre-registering a phase
+
+Before the first run of a phase, generate `protocol/phase-N.json` with `python scripts/phase_manifest.py generate` and merge it on its own, after the user has approved the models and the budget. `make lint` runs `phase_manifest.py check` on every manifest. Never edit a merged manifest. `python -m blackbox phase next --phase N` shows the next run and the spend against the budget and starts nothing. See [docs/protocol.md](docs/protocol.md#9-pre-registration).
+
 ## Proposing a practice
 
 Practices for the agent instruction file, permissions, hooks and subagents must cite a source with a URL and a publication date. Open a [practice suggestion](https://github.com/hamsasoftware/agent-black-box/issues/new?template=practice_suggestion.yml) with the source, its date, a supporting quote and the behaviour you expect it to change. A practice is adopted only when a bare-versus-plumbed comparison supports it, or when it is recorded as unproven.

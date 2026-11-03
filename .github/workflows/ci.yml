@@ -84,6 +84,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0  # phase_manifest.py check looks up harness commits in history
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.12"
@@ -92,6 +93,7 @@ jobs:
       - run: python scripts/incidents.py check
       - run: python scripts/update_readme_facts.py check
       - run: python scripts/task_lock.py check
+      - run: python scripts/phase_manifest.py check
 
   links:
     name: Markdown link check

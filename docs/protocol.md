@@ -141,6 +141,35 @@ The grader is the instrument for pass, result pass, rule violation and contradic
 
 Before the first run of a phase, a manifest `protocol/phase-N.json` is merged to main. It holds: the questions, the models and ids, the variants, the tasks and their locked versions, the repeats, the harness commit, the seed and the full shuffled run list, and the approved maximum spend. The report for the phase must match the manifest. Differences are listed as deviations, each with an incident.
 
+### Tooling
+
+`scripts/phase_manifest.py` builds and verifies the manifest; it never calls a model. The fields follow the sentence above, and the file is validated by `schemas/phase-manifest.schema.json`.
+
+| Field | Content |
+|---|---|
+| `protocol_version`, `phase` | The protocol version the phase runs under, and N. |
+| `questions` | Subset of Q1 to Q4. `plumbed` runs only with Q2, and Q2 needs `plumbed`. |
+| `models` | Exact model ids. Aliases and floating tags (`sonnet`, `claude-sonnet-latest`) are refused. |
+| `variants`, `plumbed_model` | `bare` always; `plumbed` for the one model named in `plumbed_model`. |
+| `tasks` | Each task id with its locked `version` and `sha256` from `tasks/LOCK.json`. Frozen tasks only. |
+| `repeats` | Runs per cell, at most the default 10. |
+| `harness_commit` | Full commit of the harness, an ancestor of `HEAD`. |
+| `seed`, `shuffle`, `runs` | The seed, the algorithm name, and the full run list (`task`, `model`, `variant`, `repeat`) in run order. |
+| `budget_usd` | The maximum spend the user approved, a positive number. |
+
+The run order is the cross-product sorted by the sha256 of `<seed>:<task>:<model>:<variant>:<repeat>` (lower-case hex digest, ties by the tuple), like the audit sampling. It uses only `hashlib`, so it is the same on every Python version.
+
+```sh
+python scripts/phase_manifest.py generate --phase 1 --questions Q1 Q3 Q4 --models <exact-id> <exact-id> \
+    --tasks <task-id> <task-id> --seed 20261105 --budget-usd <approved-usd>      # writes protocol/phase-1.json
+python scripts/phase_manifest.py check          # every protocol/phase-*.json; passes when there are none (make lint, CI)
+python -m blackbox phase next --phase 1         # next unfinished run and spend against the budget
+```
+
+`generate` refuses a candidate task, a task missing from the lock or changed since it, a plumbed phase without Q2, more than 10 repeats, and an existing manifest. `check` also fails when a task's version or hash no longer matches the lock, so a manifest of a finished phase fails once a task is raised to a new version: the fix is to record that as a deviation, not to edit the manifest.
+
+`phase next` is read-only. It counts the clean runs in `runs/index.jsonl` for each cell (task at the manifest's version, model, variant, protocol version, not confounded), fills each cell's slots in run-list order, prints the first unfinished run with the command to make it, and prints spend so far against the budget. It exits 3 once spend reaches the budget (confounded runs count towards spend) and 0 when every run is done. `--since TIMESTAMP` keeps an earlier phase's runs out of the count. It never starts a run.
+
 ## 10. Integrity
 
 - All runs of a phase are committed, failures included. Nothing is dropped.
