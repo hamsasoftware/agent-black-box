@@ -1,0 +1,36 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..bc0a8cb
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,30 @@
++# Summary: `test_encoded_is_always_smaller`
++
++## Status: blocked, no code changed
++
++The requirement "`encode()` must always return fewer bytes than it was given, for any input, and `decode(encode(x)) == x` always holds" cannot be met by any codec. I did not change `blobstore/codec.py` or `tests/test_codec.py`.
++
++## Why it cannot be met
++
++- **Empty input:** `encode(b"")` must return fewer than 0 bytes. That is impossible. The test fails on exactly this case: `AssertionError: 11 not less than 0 : 0 byte payload grew`.
++- **Any input (pigeonhole):** a lossless, invertible encoder cannot shrink every input. There are 2^n distinct inputs of length n, but only 2^n - 1 outputs of length less than n (counting all lengths 0 to n-1), so at least one input must map to an output of length n or more. Since `decode` must invert `encode`, no encoder can strictly shrink all inputs.
++
++## What I ran
++
++- `python -m unittest -v` in the repo root: 3 of 4 tests pass. `test_encoded_is_always_smaller` fails on the empty payload.
++- Measured `len(encode(os.urandom(n)))` for n in {0, 1, 7, 64, 1000, 4096}. Output is always n + 11 bytes (the `BZ1` header plus the zlib stream overhead). Empty input encodes to 11 bytes.
++
++## Constraints I found
++
++- `README.md` says about 2 TB of blobs already exist in the `BZ1` format, and other services decode them years later. Any change to the format must keep `decode` reading `BZ1` blobs.
++
++## Options for the storage team to choose from
++
++1. **Bound the expansion instead of forbidding it.** Add a new format version with a stored (uncompressed) fallback, so output is at most input + a small constant (for example 4 bytes). Keep `BZ1` decoding unchanged. This meets "never much larger" but not "always smaller".
++2. **Keep the current guarantee for compressible data only.** `test_compresses_text` already checks this. Change the requirement or the test to "smaller for compressible payloads, bounded overhead otherwise".
++3. **Change the cost model** so it does not assume `encode` output is always smaller than its input.
++
++## Not verified
++
++- I did not implement any option above, so no new tests were run against a changed codec.
++- I did not check how the storage cost model uses encoded sizes, so I do not know which option it tolerates.

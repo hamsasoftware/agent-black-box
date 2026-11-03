@@ -1,0 +1,79 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..3141a03
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,35 @@
++# Summary: flaky `test_schedule_respects_cap`
++
++## Root cause
++
++`compute_delay` in `retrykit/backoff.py` clamped the delay to `cap` *before* applying jitter:
++
++```python
++delay = min(cap, base * 2 ** (attempt - 1))
++return delay * rng.uniform(1 - jitter, 1 + jitter)
++```
++
++With jitter 0.1, a delay already at the cap could come out as up to `cap * 1.1`. The test uses `cap=34` with 7 attempts, so the attempt-7 delay (32 s base) lands above 34 s whenever the jitter factor exceeds 1.0625. That is roughly 19% of runs, which matches the reported flake rate. The test was flaky rather than always failing because it draws from the unseeded global RNG.
++
++`docs/RETRY.md` says "No delay may ever exceed `cap`", so the code was violating the promised policy, not just the test.
++
++## Changes
++
++- `retrykit/backoff.py`: apply jitter first, then clamp to `[0, cap]`. The comment cites `docs/RETRY.md`.
++- `tests/test_backoff.py`:
++  - `test_schedule_respects_cap` now passes a seeded `rng`, so it is deterministic.
++  - New `test_capped_delays_never_exceed_cap_under_jitter` sweeps 2000 seeds over the same schedule.
++
++## Verification
++
++- Reproduction before the fix: ran the schedule over 10,000 seeds with `cap=34, max_attempts=7`. 1879 exceeded the cap (~19%).
++- `python -m unittest -v` after the fix: 5 tests, all OK.
++- `python -m unittest tests.test_backoff.BackoffTest.test_schedule_respects_cap` repeated 50 times: 50 passes, 0 failures.
++- Regression check against the original code (loaded from `git show HEAD:retrykit/backoff.py` in memory): 343 of 2000 seeds exceed the cap, so the new test would catch the bug.
++
++## Not verified / open points
++
++- **CI itself was not checked.** The repo has no `.github/workflows` or other CI config, so I could not confirm the pipeline runs these tests or that the rerun-until-green workaround is removed. Whoever owns the CI config should drop any retry wrapper and confirm a clean run.
++- **Behaviour change:** capped delays now land exactly at `cap` with some probability instead of sometimes exceeding it. Jitter is effectively one-sided at the cap. This follows the written policy, but callers who relied on the old over-cap values would see different timing. I did not check the HTTP clients that use `retrykit`.
++- `Retrier.run` still uses the global `random` module when `rng` is not given. That is fine for production, but any test relying on `Retrier` without an injected `rng` will be nondeterministic.
++- Changes are uncommitted in the working tree.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..7a1c997 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -7,7 +7,9 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+     delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    # docs/RETRY.md: no delay may ever exceed cap, so the clamp must come after jitter.
++    return min(max(delay, 0.0), cap)
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_backoff.py b/tests/test_backoff.py
+index 2fbc302..4a6b105 100644
+--- a/tests/test_backoff.py
++++ b/tests/test_backoff.py
+@@ -16,10 +16,17 @@ class BackoffTest(unittest.TestCase):
+         self.assertEqual(delays, [1, 2, 4, 8, 16])
+ 
+     def test_schedule_respects_cap(self):
+-        retrier = Retrier(base=0.5, cap=34, max_attempts=7)
++        retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(0))
+         for delay in retrier.schedule():
+             self.assertLessEqual(delay, 34)
+ 
++    def test_capped_delays_never_exceed_cap_under_jitter(self):
++        # Attempts at or above the cap are where jitter used to push delays past it.
++        for seed in range(2000):
++            retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(seed))
++            for delay in retrier.schedule():
++                self.assertLessEqual(delay, 34, f"seed={seed} delay={delay}")
++
+     def test_run_retries_until_success(self):
+         calls = []
+         slept = []

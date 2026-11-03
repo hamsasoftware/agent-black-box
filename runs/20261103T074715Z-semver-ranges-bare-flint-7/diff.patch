@@ -1,0 +1,260 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..ca45871
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Summary: range matching in `depres/ranges.py`
++
++## What changed
++- Implemented `satisfies(version, range_)` and `max_satisfying(versions, range_)` in `depres/ranges.py`, following `docs/RANGES.md`.
++- Each comparator becomes an interval (lower and upper bound, each inclusive or exclusive). That covers primitives, X-ranges and partials, hyphen ranges, tilde and caret. A version matches a set if it falls in every interval, and `||` is a union of sets.
++- Prerelease rule: a prerelease version matches a set only if some prerelease comparator in that set names the same `MAJOR.MINOR.PATCH`.
++- Invalid ranges and versions raise `ValueError`. Range parsing happens before any version is checked, so a bad range raises even when the list of versions is empty.
++- No other files changed.
++
++## What I verified
++- `python -m unittest -v` in the workspace: 8 of 8 tests in `tests/test_ranges.py` pass (they all errored before, with `NotImplementedError`).
++- An ad-hoc spot check of 75 range/version pairs covering the examples in the tables of `docs/RANGES.md`, plus the prerelease, `||`, `v`-prefix and build-metadata rules. 73 matched on the first run. The other 2 (`^0.0` and `^0.0.x` against `0.0.9` and `0.0.5`) were wrong in my expected values: the doc says `^0.0` is `>=0.0.0 <0.1.0`, so those versions match, as the code returns.
++- Invalid ranges (`>=`, `1.x.3`, `01.2.3`, `1.2.3.4`, `a - b`, `1.2-beta`, `1.2.3 -2`, `=`, `~`, and others) all raised `ValueError`. Invalid versions (`1.0`, `1.0.0.0`, `abc`, empty string) also raised.
++- `max_satisfying` returns the input object unchanged, e.g. `"v1.4.0"` stays `"v1.4.0"`. It returns `None` when nothing matches.
++
++## Not verified / unsure
++- **Prereleases with `*`, `""`, or unbounded sets.** I followed the doc's statement that an empty set and `*` match every version, so `satisfies("2.0.0-rc.1", "*")` is `True`. npm's `*` excludes prereleases, so this is a judgment call. If you want npm behaviour, the change is one line in `_matches`.
++- **Forms not in the doc.** I did not implement `~>` or other npm extras. Those are not in the contract, so they raise `ValueError`.
++- **Lint and type checks.** I did not run a linter or type checker; the repo has no config for either that I found.
++- **Not committed.** The changes are in the working tree only.
++- **Scope of checks.** The spot-check script lived outside the workspace and was not kept. The checks I ran are listed above; the 8 unit tests are the only checks in the repo.
+diff --git a/depres/ranges.py b/depres/ranges.py
+index 248cdcd..b92e064 100644
+--- a/depres/ranges.py
++++ b/depres/ranges.py
+@@ -1,9 +1,226 @@
++"""npm-style version ranges. The contract is docs/RANGES.md."""
++
++import re
++
+ from .version import Version
+ 
++_NUM = r"(?:0|[1-9]\d*)"
++_WILD = r"[xX*]"
++_PRE = r"(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*"
++_BUILD = r"[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*"
++
++# A version that may have wildcard or missing positions: "1", "1.x", "1.2.3-beta.1+b.2".
++_PARTIAL = re.compile(
++    rf"^v?({_NUM}|{_WILD})(?:\.({_NUM}|{_WILD}))?(?:\.({_NUM}|{_WILD}))?"
++    rf"(?:-({_PRE}))?(?:\+{_BUILD})?$"
++)
++_OP_SPACE = re.compile(r"(<=|>=|<|>|=|~|\^)\s+")
++_TOKEN = re.compile(r"^(<=|>=|<|>|=|~|\^)?(.+)$")
++_HYPHEN = re.compile(r"^(\S+)\s+-\s+(\S+)$")
++
++
++def _parse_partial(text):
++    """Return (parts, prerelease) where parts is a 3-list of ints, or None for a wildcard/missing position."""
++    match = _PARTIAL.match(text)
++    if not match:
++        raise ValueError(f"invalid version in range: {text!r}")
++    parts = []
++    for item in match.group(1, 2, 3):
++        if item is None or item in ("x", "X", "*"):
++            parts.append(None)
++        elif parts and parts[-1] is None:
++            raise ValueError(f"number after wildcard in {text!r}")
++        else:
++            parts.append(int(item))
++    prerelease = tuple(match.group(4).split(".")) if match.group(4) else ()
++    if prerelease and None in parts:
++        raise ValueError(f"prerelease needs a full version: {text!r}")
++    return parts, prerelease
++
++
++def _count(parts):
++    """Number of leading specified positions (0 to 3)."""
++    count = 0
++    while count < 3 and parts[count] is not None:
++        count += 1
++    return count
++
++
++def _base(parts, prerelease):
++    """Lowest version the partial stands for: missing positions are zero."""
++    nums = [p or 0 for p in parts]
++    return Version(nums[0], nums[1], nums[2], prerelease)
++
++
++def _bump(parts, index):
++    """Increment position `index`, zero everything after it."""
++    nums = [p or 0 for p in parts]
++    nums[index] += 1
++    for i in range(index + 1, 3):
++        nums[i] = 0
++    return Version(nums[0], nums[1], nums[2])
++
++
++# Bounds are (lo, lo_inclusive, hi, hi_inclusive); None means unbounded.
++_ANY = (None, True, None, True)
++
++
++def _primitive(op, text):
++    """Bounds for one primitive comparator. Returns (bounds or None for never, named release or None)."""
++    parts, prerelease = _parse_partial(text)
++    count = _count(parts)
++    named = None
++    if count == 3:
++        v = Version(parts[0], parts[1], parts[2], prerelease)
++        named = v.release if prerelease else None
++        if op in ("", "="):
++            return (v, True, v, True), named
++        if op == ">":
++            return (v, False, None, True), named
++        if op == ">=":
++            return (v, True, None, True), named
++        if op == "<":
++            return (None, True, v, False), named
++        return (None, True, v, True), named  # "<="
++
++    if count == 0:  # "*", "x", "1.x.x" style "any"
++        if op in (">", "<"):
++            return None, None
++        return _ANY, None
++
++    base = _base(parts, ())
++    nxt = _bump(parts, count - 1)
++    if op in ("", "="):
++        return (base, True, nxt, False), None
++    if op == ">":
++        return (nxt, True, None, True), None
++    if op == ">=":
++        return (base, True, None, True), None
++    if op == "<":
++        return (None, True, base, False), None
++    return (None, True, nxt, False), None  # "<="
++
++
++def _tilde(text):
++    parts, prerelease = _parse_partial(text)
++    count = _count(parts)
++    if count == 0:
++        return _ANY, None
++    base = _base(parts, prerelease)
++    upper = _bump(parts, 0 if count == 1 else 1)
++    named = base.release if prerelease else None
++    return (base, True, upper, False), named
++
++
++def _caret(text):
++    parts, prerelease = _parse_partial(text)
++    count = _count(parts)
++    if count == 0:
++        return _ANY, None
++    base = _base(parts, prerelease)
++    # Bump the left-most non-zero specified position; if all are zero, bump the last one.
++    index = next((i for i in range(count) if parts[i] != 0), count - 1)
++    upper = _bump(parts, index)
++    named = base.release if prerelease else None
++    return (base, True, upper, False), named
++
++
++def _hyphen(low, high):
++    low_parts, low_pre = _parse_partial(low)
++    high_parts, high_pre = _parse_partial(high)
++    low_count, high_count = _count(low_parts), _count(high_parts)
++    lo = None if low_count == 0 else _base(low_parts, low_pre)
++    if high_count == 0:
++        hi, hi_inclusive = None, True
++    elif high_count == 3:
++        hi, hi_inclusive = Version(*high_parts, high_pre), True
++    else:
++        hi, hi_inclusive = _bump(high_parts, high_count - 1), False
++    names = {v.release for v, pre in ((lo, low_pre), (hi, high_pre)) if v is not None and pre}
++    return (lo, True, hi, hi_inclusive), names
++
++
++def _parse_set(text):
++    """Compile one comparator set into (bounds, names, never).
++
++    `bounds` is a list of interval tuples; `names` holds the release tuples that a
++    prerelease comparator named; `never` is True for sets that match nothing.
++    """
++    text = text.strip()
++    if not text:
++        return [], set(), False
++
++    hyphen = _HYPHEN.match(text)
++    if hyphen:
++        bound, names = _hyphen(hyphen.group(1), hyphen.group(2))
++        return [bound], names, False
++
++    bounds, names, never = [], set(), False
++    for token in _OP_SPACE.sub(r"\1", text).split():
++        match = _TOKEN.match(token)
++        op, body = match.group(1) or "", match.group(2)
++        if op in ("~", "^"):
++            bound, named = (_tilde if op == "~" else _caret)(body)
++        else:
++            bound, named = _primitive(op, body)
++        if bound is None:
++            never = True
++        else:
++            bounds.append(bound)
++        if named is not None:
++            names.add(named)
++    return bounds, names, never
++
++
++def _compile(range_):
++    if not isinstance(range_, str):
++        raise TypeError(f"range must be a str, not {type(range_).__name__}")
++    return [_parse_set(text) for text in range_.split("||")]
++
++
++def _as_version(value):
++    if isinstance(value, Version):
++        return value
++    if isinstance(value, str):
++        return Version.parse(value)
++    raise TypeError(f"version must be a str or Version, not {type(value).__name__}")
++
++
++def _in_bounds(version, bounds):
++    for lo, lo_inclusive, hi, hi_inclusive in bounds:
++        if lo is not None and (version < lo or (version == lo and not lo_inclusive)):
++            return False
++        if hi is not None and (version > hi or (version == hi and not hi_inclusive)):
++            return False
++    return True
++
++
++def _matches(version, compiled):
++    for bounds, names, never in compiled:
++        if never:
++            continue
++        # Prereleases need a comparator naming the same release. Sets with no bounds
++        # ("", "*") match everything, as docs/RANGES.md states.
++        unbounded = all(lo is None and hi is None for lo, _, hi, _ in bounds)
++        if version.prerelease and not unbounded and version.release not in names:
++            continue
++        if _in_bounds(version, bounds):
++            return True
++    return False
++
+ 
+ def satisfies(version, range_):
+-    raise NotImplementedError
++    """True if `version` satisfies the npm-style `range_`."""
++    compiled = _compile(range_)
++    return _matches(_as_version(version), compiled)
+ 
+ 
+ def max_satisfying(versions, range_):
+-    raise NotImplementedError
++    """Highest version in `versions` that satisfies `range_`, returned as given; None if none do."""
++    compiled = _compile(range_)
++    best, best_version = None, None
++    for item in versions:
++        candidate = _as_version(item)
++        if _matches(candidate, compiled) and (best_version is None or candidate > best_version):
++            best, best_version = item, candidate
++    return best

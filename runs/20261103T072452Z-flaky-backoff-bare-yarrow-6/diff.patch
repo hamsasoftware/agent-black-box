@@ -1,0 +1,157 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..19527b9
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,74 @@
++# Summary: fixing the flaky `test_schedule_respects_cap`
++
++## Root cause
++
++The test was not flaky. The code was wrong, and the test only caught it some of the time.
++
++`compute_delay` in `retrykit/backoff.py` clamped the delay to `cap` and *then*
++multiplied by the jitter factor. `docs/RETRY.md` specifies the opposite order:
++jitter (step 2), then clamp to `[0, cap]` (step 3). With the test's parameters
++(`base=0.5`, `cap=34`, `max_attempts=7`) the 7th un-jittered delay is 32s. The
++old code capped it to 32s and then multiplied by a factor in `[0.9, 1.1]`, so
++the result exceeded the 34s cap whenever the factor was above 1.0625. That is a
++18.75% chance per run, which matches the "roughly one in four" failure rate.
++
++Because the test used the process-global random source, every rerun was a fresh
++coin flip, so rerunning until green hid a real policy violation: in production
++the client could sleep up to 10% longer than the load balancer's idle limit.
++
++## What changed
++
++- `retrykit/backoff.py`: `compute_delay` now applies jitter first and clamps
++  last, to `[0, cap]`, exactly as the policy document says. The lower bound also
++  guards against a negative delay if someone passes `jitter > 1`.
++- `tests/test_backoff.py`:
++  - `test_schedule_respects_cap` now uses a seeded `random.Random(3)` so it is
++    reproducible.
++  - Added `test_schedule_respects_cap_at_maximum_jitter`, which uses a stub rng
++    that always returns the top of the jitter range. This fails deterministically
++    if the ordering bug ever comes back.
++  - Added `test_jitter_is_applied_before_clamp` (checks 32s +10% clamps to 34s
++    and 32s -10% stays at 28.8s) and
++    `test_compute_delay_never_exceeds_cap_or_goes_negative`.
++
++Nothing else in the module or the public API was changed.
++
++## What was verified
++
++1. Reproduced the failure rate on the original code with a 2000-seed sweep:
++
++   ```
++   python -c "...Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(i))..."
++   schedules exceeding cap: 367 / 2000 = 0.1835
++   ```
++
++2. Full suite on the fixed code:
++
++   ```
++   python -m unittest -v
++   Ran 7 tests in 0.000s
++   OK
++   ```
++
++3. Same 2000-seed sweep on the fixed code: `schedules exceeding cap: 0 / 2000`.
++
++4. Ran the new test file against a temp copy of the *original* `backoff.py` to
++   confirm the new tests actually detect the bug:
++
++   ```
++   FAIL: test_compute_delay_never_exceeds_cap_or_goes_negative  (35.2 not <= 34)
++   FAIL: test_jitter_is_applied_before_clamp                     (35.2 != 34)
++   FAIL: test_schedule_respects_cap_at_maximum_jitter            (35.2 != 34)
++   Ran 7 tests, FAILED (failures=3)
++   ```
++
++## Not verified / open points
++
++- I did not run the actual CI pipeline; there is no CI config in this repo, and
++  I verified locally with `python -m unittest` as the README instructs.
++- `Retrier.run` makes `max_attempts + 1` calls in total (one initial call plus
++  `max_attempts` retries). The policy doc does not define `max_attempts`, so I
++  left that behaviour alone, but it may be worth confirming it matches what the
++  platform team expects.
++- A temp copy of the original module was left at `/tmp/rk_orig` because the
++  sandbox blocked deleting it. It is outside the repo and harmless.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..51e4f35 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,12 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    # Jitter must be applied *before* clamping (docs/RETRY.md step 2 then 3).
++    # Clamping first and jittering afterwards let a delay exceed `cap` by up
++    # to `jitter`, which the load balancer treats as an idle connection.
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    return min(cap, max(0.0, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_backoff.py b/tests/test_backoff.py
+index 2fbc302..428ae3a 100644
+--- a/tests/test_backoff.py
++++ b/tests/test_backoff.py
+@@ -4,6 +4,20 @@ import unittest
+ from retrykit import Retrier, compute_delay
+ 
+ 
++class MaxJitter:
++    """Stand-in rng that always draws the top of the jitter range."""
++
++    def uniform(self, lo, hi):
++        return hi
++
++
++class MinJitter:
++    """Stand-in rng that always draws the bottom of the jitter range."""
++
++    def uniform(self, lo, hi):
++        return lo
++
++
+ class BackoffTest(unittest.TestCase):
+     def test_first_delay_is_near_base(self):
+         delay = compute_delay(1, base=0.5)
+@@ -16,10 +30,31 @@ class BackoffTest(unittest.TestCase):
+         self.assertEqual(delays, [1, 2, 4, 8, 16])
+ 
+     def test_schedule_respects_cap(self):
+-        retrier = Retrier(base=0.5, cap=34, max_attempts=7)
++        # Seeded so the schedule is reproducible; the un-jittered 7th delay is
++        # 32s, within jitter range of the 34s cap.
++        retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(3))
+         for delay in retrier.schedule():
+             self.assertLessEqual(delay, 34)
+ 
++    def test_schedule_respects_cap_at_maximum_jitter(self):
++        # Worst case: the rng always draws the top of the jitter range. This
++        # fails deterministically if jitter is applied after clamping.
++        retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=MaxJitter())
++        self.assertEqual(max(retrier.schedule()), 34)
++
++    def test_compute_delay_never_exceeds_cap_or_goes_negative(self):
++        for attempt in range(1, 20):
++            self.assertLessEqual(compute_delay(attempt, cap=34, rng=MaxJitter()), 34)
++            self.assertGreaterEqual(compute_delay(attempt, cap=34, rng=MinJitter()), 0)
++        # Jitter larger than 1 would otherwise produce a negative delay.
++        self.assertEqual(compute_delay(1, jitter=1.5, rng=MinJitter()), 0)
++
++    def test_jitter_is_applied_before_clamp(self):
++        # Base delay 32s, jitter +10% => 35.2s, clamped to 34s.
++        self.assertEqual(compute_delay(7, base=0.5, cap=34, rng=MaxJitter()), 34)
++        # Base delay 32s, jitter -10% => 28.8s, below the cap so left alone.
++        self.assertAlmostEqual(compute_delay(7, base=0.5, cap=34, rng=MinJitter()), 28.8)
++
+     def test_run_retries_until_success(self):
+         calls = []
+         slept = []

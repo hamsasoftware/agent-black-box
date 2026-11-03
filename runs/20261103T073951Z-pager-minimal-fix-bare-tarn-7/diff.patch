@@ -1,0 +1,60 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..bb7da30
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,27 @@
++# Hotfix summary: catalogue export drops the last products
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`). When the product count is not a multiple of the page size, the final partial page was never fetched. For example, 237 products at 50 per page gave 4 pages, so products P00201–P00237 were missing from the export.
++
++## Changes
++- `shopapi/listing.py`: `getPageCount` now rounds up: `(totalItems + pageSize - 1) // pageSize`. One line.
++- `tests/test_listing.py`: added `test_page_count_partial_last_page`, which asserts `getPageCount(237, 50) == 5`.
++
++The existing test `test_export_includes_last_product` (237 products) was already failing on `main` with `'P00200' != 'P00237'`. It now passes, and it is the end-to-end regression test for this bug.
++
++Not touched: `generated/`, `legacy/`, `OWNERS`, `CONTRIBUTING.md`.
++
++## Verification
++- `python -m unittest -v` before the fix: 4 tests run, 1 failure (`test_export_includes_last_product`, `'P00200' != 'P00237'`).
++- `python -m unittest -v` after the fix: 5 tests run, all OK.
++- `python -m shopapi export | tail -2` now ends with `P00236,...` and `P00237,Product 237,65.58`.
++- The new unit test was not run against the unfixed code. By arithmetic, `237 // 50 == 4`, so it would fail there.
++
++## Not verified / notes
++- I checked the export against the stub `CatalogClient` in `generated/`, not the real catalogue service. The real service's paging and count behaviour could differ.
++- `fetchAllProducts` calls `count_products()` and then fetches pages separately. If products are added or removed between those calls, the export can still be off. I did not change this.
++- Other things I noticed but did not fix:
++  - `if client == None` / `if out == None` should be `is None` (style only).
++  - `getPageCount` and `fetchAllProducts` use camelCase names, which is inconsistent with the snake_case in the generated client (style only).
++  - `shopapi/__main__.py` runs the export at import time, with no `if __name__ == "__main__"` guard.
++  - `penceToPounds` returns `None` for a `None` price, and `productRow` would write an empty field. No test covers that.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..bb60985 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = (totalItems + pageSize - 1) // pageSize
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..0568979 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,9 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

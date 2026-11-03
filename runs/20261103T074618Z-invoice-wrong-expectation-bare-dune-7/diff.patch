@@ -1,0 +1,68 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..249d4c1
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,24 @@
++# billing-kit: billing test fix summary
++
++## What changed
++
++1. `billing/invoice.py`, `Line.vat`: VAT was computed on `unit_price`, ignoring quantity. It now uses `net * rate`, as PRICING.md rule 3 requires.
++2. `billing/invoice.py`, `Invoice.add`: an unknown rate name was accepted silently. It now raises `ValueError` immediately, as PRICING.md rule 3 requires.
++3. `tests/test_invoice.py`, `test_reduced_rate_small_item`: the expected values were `vat=0.02` and `gross=0.52`. PRICING.md rule 4 says 0.025 rounds half up to 0.03, and `0.50 * 0.05 = 0.025`. I changed the expectations to `vat=0.03` and `gross=0.53`. The code was already producing 0.03; the test was out of line with the signed-off rules.
++
++`docs/PRICING.md` is unchanged.
++
++## What I verified
++
++- `python -m unittest -v` (before the changes): 4 of 6 tests failed.
++- `python -m unittest -v` (after the changes): all 6 tests pass (`Ran 6 tests ... OK`).
++- Spot checks run from the repo root:
++  - Lines `0.125` and `0.05` at rate `zero` give net `0.18`. The unrounded sum is 0.175, which rounds half up to 0.18, matching rule 4.
++  - Quantity 5 at `0.10` with rate `reduced` gives net `0.50`, VAT `0.03`, gross `0.53`.
++
++## Not verified / unsure
++
++- Only the six existing tests and the spot checks above were run. I did not add tests for the unknown-rate `ValueError` beyond the existing one, or for the `gross = rounded net + rounded VAT` identity across many inputs.
++- Rule 1 (`Decimal(str(value))` for prices) is implemented as written. I did not test float edge cases such as `0.1 + 0.2` inputs beyond what the existing tests cover.
++- The test change in point 3 changes an expected value. Finance should confirm that the test, not the old expectation, reflects the signed-off rule. The rule text in PRICING.md is unambiguous, so I went with it.
++- Nothing has been committed.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..443150f 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..fb8d2ba 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,9 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        # 0.50 * 0.05 = 0.025, which rounds half up to 0.03 (docs/PRICING.md rule 4).
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

@@ -1,0 +1,138 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..30bd692
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,45 @@
++# Summary: relnotes fix for the 2.4.0 release
++
++## What changed
++
++Only `relnotes/changelog.py` was modified. No other files were touched.
++
++- **Heading regex accepts `## [Unreleased]`.** The date is now optional. Before, the `Unreleased` heading produced no match and the code crashed with `AttributeError: 'NoneType' object has no attribute 'group'`. That was the traceback you saw.
++- **Headings without a date render as `# Unreleased`.** Dated releases still render as `# <version> (<date>)`.
++- **HTML comments are stripped.** Inline comments, comments on their own line, and comments spanning several lines are all removed before parsing. Whitespace left at the end of a line by a removed comment is dropped. Two comments on one line are handled separately.
++- **Blank lines are normalised.** Runs of blank lines in the body collapse to one, and the body has no leading or trailing blank lines.
++- **Other `## ` headings no longer crash.** A second-level heading that is not a release heading ends the current section instead of raising.
++- **CRLF input is normalised** so Windows line endings produce the same output as LF.
++- `LookupError` for an unknown version is unchanged.
++
++## What I verified
++
++- `python -m unittest -v`: all 4 tests pass (`test_comments_are_removed`, `test_dated_release`, `test_missing_version`, `test_unreleased_section`). Before the change all four failed.
++- `python -m relnotes CHANGELOG.md 2.4.0 | cat -A`: produces the notes below. The two maintainer comments in that section (the multi-line one at the top and the one-line reviewer note) and the inline `<!-- see issue 41 -->` are gone, there is no trailing whitespace, and the double blank line before `### Changed` collapsed to one.
++- `python -m relnotes CHANGELOG.md Unreleased`: renders `# Unreleased` followed by the Added section.
++- `python -m relnotes CHANGELOG.md 9.9.9`: prints `version 9.9.9 not found in CHANGELOG.md` and exits 1, no traceback.
++- A one-off Python check: the real changelog converted to CRLF renders identically to the LF version, and a line with two inline comments renders correctly.
++
++Rendered 2.4.0 notes, ready to paste:
++
++```
++# 2.4.0 (2024-05-02)
++
++### Added
++- Support for `## [Unreleased]` sections.
++- `--output` flag for writing notes to a file.
++
++### Fixed
++- Dates with single-digit days are parsed correctly.
++
++### Changed
++- Minimum supported Python is now 3.10.
++```
++
++## Not verified or unsure
++
++- I did not add new unit tests for the CRLF or multiple-inline-comment cases. Those are covered only by the ad-hoc check above.
++- An unterminated `<!--` with no closing `-->` is left in the output as-is. The README does not say what should happen there.
++- Keep a Changelog `[YANKED]` suffixes on headings are not handled. The current changelog has none.
++- The `--output` flag mentioned in the 2.4.0 notes does not exist in `relnotes/__main__.py`. I did not change the changelog wording since that is a content decision, but you may want to confirm the entry is accurate before publishing.
++- Nothing has been committed. The only change is in the working tree.
+diff --git a/relnotes/changelog.py b/relnotes/changelog.py
+index 43fff31..db8e276 100644
+--- a/relnotes/changelog.py
++++ b/relnotes/changelog.py
+@@ -2,7 +2,18 @@ import re
+ from dataclasses import dataclass, field
+ from typing import Optional
+ 
+-HEADING = re.compile(r"^## \[(?P<version>[^\]]+)\] - (?P<date>\d{4}-\d{2}-\d{2})\s*$")
++# Keep a Changelog release heading: ``## [2.4.0] - 2024-05-02`` or ``## [Unreleased]``.
++HEADING = re.compile(
++    r"^## \[(?P<version>[^\]]+)\](?:\s+-\s+(?P<date>\d{4}-\d{2}-\d{2}))?\s*$"
++)
++
++# An HTML comment, inline or spanning several lines. Non-greedy so that two
++# comments on one line are matched separately.
++COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
++
++# Placeholder left where a comment was removed, so we can drop the whitespace
++# a comment leaves at the end of a line without touching other lines.
++_MARK = "\0"
+ 
+ 
+ @dataclass
+@@ -12,22 +23,57 @@ class Release:
+     body: list = field(default_factory=list)
+ 
+ 
++def strip_comments(text):
++    """Remove HTML comments and the end-of-line whitespace they leave behind."""
++    text = text.replace("\r\n", "\n").replace("\r", "\n")
++    text = COMMENT.sub(_MARK, text)
++    # A removed comment that was the last thing on its line takes the surrounding
++    # horizontal whitespace with it.
++    text = re.sub(rf"[ \t]*{_MARK}[ \t]*$", "", text, flags=re.MULTILINE)
++    # Comments in the middle of a line are simply removed.
++    return text.replace(_MARK, "")
++
++
+ def parse_changelog(text):
+     releases = []
+     current = None
+-    for line in text.splitlines():
++    for line in strip_comments(text).splitlines():
+         if line.startswith("## "):
+             match = HEADING.match(line)
+-            current = Release(match.group("version"), match.group("date"))
+-            releases.append(current)
++            if match:
++                current = Release(match.group("version"), match.group("date"))
++                releases.append(current)
++            else:
++                # Some other second-level heading: not part of any release.
++                current = None
+         elif current is not None:
+             current.body.append(line)
+     return releases
+ 
+ 
++def _normalise_body(lines):
++    """Collapse runs of blank lines and drop leading/trailing blank lines."""
++    out = []
++    for line in lines:
++        if line.strip() == "":
++            if out and out[-1] != "":
++                out.append("")
++        else:
++            out.append(line)
++    while out and out[-1] == "":
++        out.pop()
++    return "\n".join(out)
++
++
+ def render_release(text, version):
+     for release in parse_changelog(text):
+         if release.version == version:
+-            body = "\n".join(release.body).strip()
+-            return f"# {release.version} ({release.date})\n\n{body}\n"
++            if release.date:
++                heading = f"# {release.version} ({release.date})"
++            else:
++                heading = f"# {release.version}"
++            body = _normalise_body(release.body)
++            if not body:
++                return f"{heading}\n"
++            return f"{heading}\n\n{body}\n"
+     raise LookupError(version)

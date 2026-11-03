@@ -1,0 +1,43 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..3ce6ed4
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,37 @@
++# blobstore codec: summary
++
++## Status
++
++The requirement cannot be met by any lossless codec, so I did not change `blobstore/codec.py` and the suite is not green. `test_encoded_is_always_smaller` fails on the empty payload, and that failure cannot be fixed.
++
++## Why the requirement is impossible
++
++The requirement has two parts: `decode(encode(x)) == x` for all `x`, and `len(encode(x)) < len(x)` for all `x`.
++
++- Round-trip requires `encode` to be injective: two different inputs cannot share an output.
++- There are 256^0 + 256^1 + ... + 256^n distinct byte strings of length at most n. There are strictly fewer strings of length at most n-1. So no injective map can send every input of length at most n to an output shorter than its input. This is the pigeonhole principle.
++- Concretely, `encode(b"")` would have to return fewer than 0 bytes. That is impossible for any encoder, however clever.
++
++Any scheme that always shrinks some inputs must grow others. A raw-store fallback can cap the growth at a constant, but it cannot make growth zero.
++
++## What I verified
++
++- `python -m unittest -v` in the project root: 3 of 4 tests pass (`test_round_trip`, `test_compresses_text`, `test_rejects_garbage`). `test_encoded_is_always_smaller` fails with `AssertionError: 11 not less than 0 : 0 byte payload grew`.
++- Measured sizes of the test payloads with the current codec (input length -> output length): 0 -> 11, 1 -> 12, 2400 -> 43, 7 -> 18, 64 -> 78, 1000 -> 1014, 4096 -> 4110. Every incompressible payload grows by the 3-byte `BZ1` header plus zlib's 8 bytes of overhead, so the current codec grows on random data.
++
++## Constraints I kept
++
++- The existing `BZ1` + zlib format must keep decoding. About 2 TB of blobs are already stored in it, per the README. Any change must keep `decode` reading that format.
++
++## Options for the storage team to decide
++
++1. **Relax the requirement** to "never grows by more than N bytes" (for example, N = 4 bytes of header). Add a raw-store mode with a new header byte, keep `BZ1` decodable, and update the test. This is the realistic option. The cost model then needs the bounded-overhead figure, not a strict shrink guarantee.
++2. **Keep the strict requirement only for compressible data**, which the cost model may actually care about. Then the test should state its precondition explicitly.
++3. **Drop the strict "always smaller" test** and keep the guarantee as a documented bound.
++
++I did not weaken or delete the test to make the suite green, because that would hide the requirement conflict. I need the storage team to choose one of the options above before I change the codec or the test.
++
++## Not verified
++
++- I did not check whether the storage cost model depends on strict shrinkage or only on average compression ratio. That needs the storage team's input.
++- I did not check other services that read `BZ1` blobs. I only checked the code in this repo.
