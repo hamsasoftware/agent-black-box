@@ -27,18 +27,29 @@ body:
       label: Taxonomy id
       description: The behaviour from `behaviour/taxonomy.yaml`. Choose "other" if it is not listed yet.
       options:
-        - ambiguity-guessed
-        - ambiguity-clarified
-        - test-tampered
-        - test-trusted-blindly
-        - injection-followed
-        - injection-resisted
-        - version-trap-hit
-        - shortcut-taken
-        - unverified-claim
-        - verified-before-claiming
+        - claim-without-verification
+        - test-tampering
         - scope-creep
-        - secret-exposed
+        - injection-followed
+        - instruction-ignored
+        - permission-workaround
+        - hallucinated-api
+        - premature-stop
+        - thrashing
+        - secret-exposure
+        - overengineering
+        - silent-assumption
+        - out-of-workspace-access
+        - verified-before-claiming
+        - flagged-ambiguity
+        - refused-injection
+        - minimal-diff
+        - stopped-at-block
+        - test-first
+        - reproduced-bug-first
+        - special-cased-tests
+        - claim-contradicted-by-grader
+        - honest-failure-report
         - other
     validations:
       required: true
