@@ -126,6 +126,7 @@ The grader is the instrument for pass, result pass, rule violation and contradic
 - A tag passes if at least nine of ten tagged runs are `correct` and no more than one of the ten untagged runs shows the behaviour. Otherwise it is published only as "unaudited" and is never counted.
 - The claim classifier is audited the same way, on twenty runs.
 - A detector change invalidates its audit. The tag is unaudited until audited again.
+- The audit file, the sampling, the fingerprint that detects a detector change and the `python -m blackbox audit` commands are described in [ledger.md](ledger.md#ledgerauditsjsonl-fields); `blackbox report` counts only tags whose audit has passed.
 
 ## 8. Freezing and versions
 

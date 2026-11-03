@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hamsasoftware/agent-black-box/schemas/audit.schema.json",
+  "title": "agent-black-box tag audit line",
+  "description": "One line of ledger/audits.jsonl: one reviewed run in one audit of one tag (or of the claim classifier, tag claim-classifier). docs/ledger.md explains every field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audit_id",
+    "tag",
+    "group",
+    "seed",
+    "task",
+    "model",
+    "run_id",
+    "verdict",
+    "reviewer",
+    "date",
+    "note",
+    "detector_fingerprint"
+  ],
+  "properties": {
+    "audit_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,119}$"
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "group": {
+      "type": "string",
+      "enum": [
+        "tagged",
+        "untagged"
+      ]
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "task": {
+      "type": "string",
+      "pattern": "^\\S+$"
+    },
+    "model": {
+      "type": "string",
+      "pattern": "^\\S+$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}T\\d{6}Z-\\S+$"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "correct",
+        "wrong",
+        "unclear"
+      ]
+    },
+    "reviewer": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "note": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "detector_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

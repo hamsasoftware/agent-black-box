@@ -24,6 +24,10 @@ Subjects also carry `run_id`, `task_id` and `variant`, which lead to `runs/<run_
 
 The incident log (rendered to `docs/incidents.md`). `blackbox index` and `blackbox report` read it: every run listed in `affected.runs` of an incident with `invalidates_results: true` is marked `confounded_by` that incident in `runs/index.jsonl` and left out of the pass rates and means in `docs/results.md`, which lists it separately.
 
+## audits.jsonl
+
+Tag audits, one line per reviewed run, written only by `python -m blackbox audit record`. A tag is counted in `docs/results.md` only while its latest audit has passed. Fields and rules: [docs/ledger.md](../docs/ledger.md#ledgerauditsjsonl-fields).
+
 ## builders/
 
 `builders/<name>/events.jsonl` holds the redacted, shortened event log of each builder agent, produced by:

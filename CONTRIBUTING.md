@@ -53,6 +53,10 @@ Anything under `runs/` comes from a real agent session and may contain secrets t
 
 When you find a mistake in the harness, a detector, a task, CI, a guard or in how a change was reviewed, add an entry to `ledger/incidents.jsonl` in the same pull request as the fix, then run `python scripts/incidents.py render`. Record only what you know: leave a time as `null` rather than guessing it. The fields are checked by `make lint`, and [docs/incidents.md](docs/incidents.md) explains the aim. Name the agents involved and cite the commit, the run ids and the test that now prevents a repeat.
 
+## Auditing a tag
+
+A behaviour tag is counted in `docs/results.md` only after it passes an audit in `ledger/audits.jsonl`. Draw the runs with `python -m blackbox audit sample --tag T --seed N`, read each one against its raw events and diff, and record the verdict with `python -m blackbox audit record`; `python -m blackbox audit status` shows where every tag stands. Changing a detector makes its tag unaudited again. Details are in [docs/ledger.md](docs/ledger.md#ledgerauditsjsonl-fields).
+
 ## Pull request checklist
 
 The [pull request template](.github/PULL_REQUEST_TEMPLATE.md) asks for:

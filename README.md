@@ -18,7 +18,7 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | Cost of every run | $14.54 |
 | Agents on the ledger | 4 builders, 115 subjects |
 | Behaviours catalogued | 23 |
-| Errors logged | 42, 9 still open |
+| Errors logged | 43, 10 still open |
 <!-- facts:end -->
 
 ## Start here
