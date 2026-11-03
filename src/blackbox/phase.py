@@ -174,26 +174,19 @@ def index_rows(root: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def matching(m: dict[str, Any], rows: list[dict[str, Any]], since: str | None = None) -> list[dict[str, Any]]:
-    """Index rows that belong to the manifest: the listed task at its locked version, a listed model and variant,
-    under the manifest's protocol version, started at or after `since` if given. Ordered by run id (a timestamp)."""
-    out = []
+def matching(m: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Index rows that belong to the manifest: stamped `phase == N` by the runner (which refuses the stamp unless the run
+    was in the manifest) and of a listed task, model and variant. Ordered by run id (a timestamp)."""
     cells = {(t, model, variant) for t in m["tasks"] for model, variant in variant_pairs(m["models"], m["variants"], m.get("plumbed_model"))}
-    for r in rows:
-        if (r.get("task_id"), r.get("model"), r.get("variant")) not in cells:
-            continue
-        if r.get("task_version") != m["tasks"][r["task_id"]]["version"] or r.get("protocol_version") != m["protocol_version"]:
-            continue
-        if since and str(r.get("started_at") or "") < since:
-            continue
-        out.append(r)
+    out = [r for r in rows if r.get("phase") == m["phase"] and not isinstance(r.get("phase"), bool)
+           and (r.get("task_id"), r.get("model"), r.get("variant")) in cells]
     return sorted(out, key=lambda r: str(r["run_id"]))
 
 
-def progress(m: dict[str, Any], rows: list[dict[str, Any]], since: str | None = None) -> dict[str, Any]:
+def progress(m: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Where a phase stands. The n-th clean run of a cell fills that cell's n-th slot in run-list order. Spend counts every
     matching run, confounded ones too, because the money is gone either way."""
-    mine = matching(m, rows, since)
+    mine = matching(m, rows)
     done_per_cell: dict[tuple[str, str, str], int] = {}
     for r in mine:
         if not r.get("confounded_by"):

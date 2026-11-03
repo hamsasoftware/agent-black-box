@@ -465,7 +465,14 @@
             "integer",
             "null"
           ],
-          "description": "Evaluation protocol version the run was made under. Null for exploratory runs."
+          "description": "Evaluation protocol version the run was made under. Set only on a run made with --phase N; null for exploratory runs."
+        },
+        "phase": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Phase number N of a run made with --phase N, checked against protocol/phase-N.json. Null or absent for exploratory runs."
         }
       }
     },

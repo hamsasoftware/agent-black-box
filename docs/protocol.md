@@ -76,7 +76,7 @@ Task-specific rules are written the same way. The prompt hash recorded with each
 | G2 Reference solutions | The untouched fixture fails. The reference solution and every declared **alternative good solution** pass (a different legitimate way to satisfy the prompt, with its reason in `task.yaml`). Every solution that breaks a rule or cheats fails the checks declared for it. Every required check is failed by the untouched fixture or by at least one non-reference solution, so no check is untested. Every task has rule-breaking solutions for its scope, its existing tests and its summary. | `tests/tasks/test_tasks_graders.py` and `test_tasks_criteria.py`, run in CI. |
 | G3 Pilot review | At least five pilot runs of the cheapest model under the candidate version. Every failed required check in those runs is reviewed against the diff and transcript and given a verdict: justified by a visible rule, result or defensible trap, or unfair. | `tasks/<id>/PILOT.md` with a section `## v<N>` listing the run ids, one line per failed required check with its verdict, and `- Verdict: approved` or `rejected`. `scripts/task_lock.py write` refuses to freeze without an approved section for the version. |
 
-An unfair verdict means the task changes, its version increases and G3 restarts. A task that has not passed all three gates is a **candidate** (`frozen: false` in `task.yaml`) and is not run in a phase. Pilot runs are exploratory and are never pooled with phase runs.
+An unfair verdict means the task changes, its version increases and G3 restarts. A task that has not passed all three gates is a **candidate** (`frozen: false` in `task.yaml`) and is not run in a phase. Pilot runs are exploratory and are never pooled with phase runs: a run is stamped with a protocol version only when it is made with `--phase N` (section 9).
 
 ## 4. Design of a phase
 
@@ -133,7 +133,7 @@ The grader is the instrument for pass, result pass, rule violation and contradic
 - `tasks/LOCK.json` holds the version and the SHA-256 of every frozen task's files: `task.yaml`, `PROMPT.md`, `NOTES.md`, `grader/` and `fixture/`. Candidates (`frozen: false`) are not in it and cannot be named in a phase manifest.
 - `scripts/task_lock.py check` runs in CI. It fails when a frozen task's content differs from its lock at the same version, when a version goes down, when a frozen task is missing from the lock, or when a task in the lock is gone or no longer frozen.
 - To change a task: raise `version`, add a dated entry to its version history saying what changed, why, and whether earlier results stay comparable (normally they do not), pass the gates again, then write the lock.
-- Every run records `task_version`, `task_sha256`, the compiled-prompt hash, `harness_commit` and `protocol_version`.
+- Every run records `task_version`, `task_sha256`, the compiled-prompt hash, `harness_commit` and, for a phase run only, `protocol_version` and `phase`. `harness_commit` ends in `+dirty` only when a tracked file outside `ledger/` and `runs/` (the harness's own output) differs from the commit.
 - Results are grouped by task version. Different versions are never pooled.
 - The protocol itself is versioned the same way. Its change log is at the end of this file.
 
@@ -166,9 +166,13 @@ python scripts/phase_manifest.py check          # every protocol/phase-*.json; p
 python -m blackbox phase next --phase 1         # next unfinished run and spend against the budget
 ```
 
-`generate` refuses a candidate task, a task missing from the lock or changed since it, a plumbed phase without Q2, more than 10 repeats, and an existing manifest. `check` also fails when a task's version or hash no longer matches the lock, so a manifest of a finished phase fails once a task is raised to a new version: the fix is to record that as a deviation, not to edit the manifest.
+`generate` refuses a candidate task, a task missing from the lock or changed since it, a plumbed phase without Q2, more than 10 repeats, and an existing manifest. `check` verifies each task against `tasks/LOCK.json` as committed at the manifest's own `harness_commit` (`git show <commit>:tasks/LOCK.json`), so a merged manifest keeps passing when a task is later raised to a new version. Against the lock as it is now, a mismatch is a failure while the phase is unfinished (a task changed under a running phase: stop and log an incident) and only an informational note once every run of the phase is recorded. `generate` still requires the tasks to match the lock now.
 
-`phase next` is read-only. It counts the clean runs in `runs/index.jsonl` for each cell (task at the manifest's version, model, variant, protocol version, not confounded), fills each cell's slots in run-list order, prints the first unfinished run with the command to make it, and prints spend so far against the budget. It exits 3 once spend reaches the budget (confounded runs count towards spend) and 0 when every run is done. `--since TIMESTAMP` keeps an earlier phase's runs out of the count. It never starts a run.
+### Running a phase run
+
+A run is exploratory unless it is made with `--phase N` (`make run-task ... PHASE=N`). Exploratory runs, including pilots and runs of candidate tasks, have `protocol_version` and `phase` null whatever the task version. `--phase N` is refused with a message, before anything runs or is spent, unless all of these hold: the task is frozen; its version and SHA-256 match `tasks/LOCK.json`; `protocol/phase-N.json` exists and passes the manifest checks of `src/blackbox/phase.py`; and it lists this task (at the locked version and hash), this model and this variant. Only then does the record carry `protocol_version` (the manifest's) and `phase` N.
+
+`phase next` is read-only. It counts the clean runs in `runs/index.jsonl` for each cell (`phase` equal to N, and the task, model and variant of the cell; not confounded), fills each cell's slots in run-list order, prints the first unfinished run with the command to make it, and prints spend so far against the budget. It exits 3 once spend reaches the budget (confounded runs count towards spend) and 0 when every run is done. Runs are matched by their `phase` stamp alone, so exploratory runs and other phases never count. It never starts a run.
 
 ## 10. Integrity
 

@@ -188,7 +188,7 @@ def test_env_file_lookup(tmp_path, monkeypatch, env_file):
 def test_an_unpinned_task_is_recorded_as_version_one_without_a_protocol(do_run, task_dir):
     from blackbox import taskspec
     _, rec, argv = do_run("success")
-    assert rec["task_version"] == 1 and rec["protocol_version"] is None
+    assert rec["task_version"] == 1 and rec["protocol_version"] is None and rec["phase"] is None
     assert rec["task_sha256"] == taskspec.task_sha256(task_dir)
     assert rec["harness_commit"] is None, "the test root is not a git checkout"
     assert "Rules for this task" not in argv["argv"][1]
@@ -204,7 +204,7 @@ def test_a_pinned_task_sends_its_rules_and_records_the_protocol(do_run, task_dir
     assert sent.startswith("Fix the bug") and sent.rstrip().endswith("- Change only calc.py.")
     assert "Rules for this task:" in sent
     assert rec["prompt_sha256"] == hashlib.sha256(sent.encode()).hexdigest()
-    assert rec["task_version"] == 2 and rec["protocol_version"] == 1
+    assert rec["task_version"] == 2 and rec["protocol_version"] is None and rec["phase"] is None, "no --phase: exploratory"
 
 
 def test_harness_commit_names_the_commit_and_flags_local_changes(tmp_path):
@@ -226,3 +226,134 @@ def test_harness_commit_names_the_commit_and_flags_local_changes(tmp_path):
     (tmp_path / "untracked.txt").write_text("x")
     git("checkout", "--", "f.txt")
     assert harness_commit(tmp_path) == clean, "untracked files do not make the checkout dirty"
+
+
+def test_harness_commit_ignores_the_harness_own_output_but_not_source(tmp_path):
+    import subprocess
+    from blackbox.runner import harness_commit
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@localhost", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@localhost",
+           "PATH": __import__("os").environ["PATH"], "HOME": str(tmp_path)}
+    repo = tmp_path / "r"
+    for d in ("ledger", "runs", "src", "tests", "tasks", "schemas", "docs", "scripts"):
+        (repo / d).mkdir(parents=True)
+        (repo / d / "f.txt").write_text("one")
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
+    git("init", "-q")
+    git("add", "-A")
+    git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "first")
+    clean = harness_commit(repo)
+    assert re.fullmatch(r"[0-9a-f]{40}", clean)
+    (repo / "ledger" / "f.txt").write_text("two")
+    (repo / "runs" / "f.txt").write_text("two")
+    assert harness_commit(repo) == clean, "rewriting ledger/ and runs/ files is the harness's own output"
+    for d in ("src", "tests", "tasks", "schemas", "docs", "scripts"):
+        (repo / d / "f.txt").write_text("two")
+        assert harness_commit(repo) == clean + "+dirty", d
+        git("checkout", "--", f"{d}/f.txt")
+        assert harness_commit(repo) == clean
+    (repo / "src" / "f.txt").write_text("two")
+    (repo / "ledger" / "f.txt").write_text("three")
+    assert harness_commit(repo) == clean + "+dirty", "source changes still count next to harness output"
+
+
+def test_consecutive_runs_do_not_record_dirty_from_their_own_ledger_writes(do_run, root):
+    import subprocess
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@localhost", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@localhost",
+           "PATH": __import__("os").environ["PATH"], "HOME": str(root)}
+    (root / "ledger").mkdir()
+    (root / "ledger" / "agents.jsonl").write_text("")
+    (root / "runs").mkdir(exist_ok=True)
+    (root / "runs" / "index.jsonl").write_text("")
+    def git(*args):
+        subprocess.run(["git", *args], cwd=root, env=env, check=True, capture_output=True)
+    git("init", "-q")
+    git("add", "-A")
+    git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "first")
+    commits = [do_run("success")[1]["harness_commit"] for _ in range(3)]
+    assert all(re.fullmatch(r"[0-9a-f]{40}", c) for c in commits), commits
+    assert (root / "ledger" / "agents.jsonl").read_text(), "the ledger was rewritten between the runs"
+
+
+# ---- --phase ----------------------------------------------------------------------------------------------------------
+
+def phase_setup(root, task_dir, *, frozen=True, lock=True, manifest=True, version=2, models=("claude-sonnet-5-5",), variants=("bare",)):
+    """Make the demo task a frozen v2 task, lock it, and write a valid manifest for phase 1 under `root`."""
+    from blackbox import phase, taskspec
+    spec = task_dir / "task.yaml"
+    spec.write_text(spec.read_text().rstrip("\n") + f"\nversion: {version}\nfrozen: {'true' if frozen else 'false'}\n")
+    sha = taskspec.task_sha256(task_dir)
+    (root / "tasks").mkdir(exist_ok=True)
+    (root / "tasks" / "LOCK.json").write_text(json.dumps({"protocol": 1, "tasks": {"demo-add": {"version": version, "sha256": sha}} if lock else {}}))
+    if manifest:
+        (root / "schemas").mkdir(exist_ok=True)
+        (root / "schemas" / "phase-manifest.schema.json").write_text((FIXTURES.parents[2] / "schemas" / "phase-manifest.schema.json").read_text())
+        m = {"protocol_version": 1, "phase": 1, "questions": ["Q1"], "models": list(models), "variants": list(variants), "plumbed_model": None,
+             "tasks": {"demo-add": {"version": version, "sha256": sha}}, "repeats": 2, "harness_commit": "0" * 40, "seed": 5,
+             "shuffle": phase.SHUFFLE, "budget_usd": 5.0, "runs": []}
+        m["runs"] = phase.expected_runs(m)
+        (root / "protocol").mkdir(exist_ok=True)
+        (root / "protocol" / "phase-1.json").write_text(json.dumps(m))
+    return sha
+
+
+def test_a_candidate_task_run_is_exploratory(do_run, root, task_dir):
+    phase_setup(root, task_dir, frozen=False, lock=False, manifest=False)
+    _, rec, _ = do_run("success")
+    assert rec["task_version"] == 2 and rec["protocol_version"] is None and rec["phase"] is None
+
+
+def test_a_frozen_locked_task_without_phase_is_still_exploratory(do_run, root, task_dir):
+    phase_setup(root, task_dir)
+    _, rec, _ = do_run("success")
+    assert rec["protocol_version"] is None and rec["phase"] is None
+
+
+def test_a_valid_phase_run_is_stamped_with_the_protocol_and_the_phase(do_run, root, task_dir):
+    phase_setup(root, task_dir)
+    _, rec, _ = do_run("success", phase=1)
+    assert rec["protocol_version"] == 1 and rec["phase"] == 1
+    assert schema.validate_run(rec, json.loads((FIXTURES.parents[2] / "schemas" / "ledger.schema.json").read_text())) == []
+    from blackbox import report
+    assert report.index_row(rec)["phase"] == 1
+
+
+@pytest.mark.parametrize("setup, needle", [
+    (dict(frozen=False, lock=False), "candidate"),
+    (dict(lock=False), "not in tasks/LOCK.json"),
+    (dict(manifest=False), "does not exist"),
+    (dict(models=("claude-haiku-4-5-20251001",)), "model claude-sonnet-5-5 is not in the manifest"),
+])
+def test_phase_is_refused_before_anything_runs(do_run, root, task_dir, setup, needle):
+    phase_setup(root, task_dir, **setup)
+    with pytest.raises(HarnessError, match=needle):
+        do_run("success", phase=1)
+    assert not (root / "runs").exists() and not (root / "ledger").exists(), "nothing ran and nothing was written"
+
+
+def test_phase_is_refused_for_an_invalid_manifest(do_run, root, task_dir):
+    phase_setup(root, task_dir)
+    path = root / "protocol" / "phase-1.json"
+    m = json.loads(path.read_text())
+    m["runs"].pop()
+    path.write_text(json.dumps(m))
+    with pytest.raises(HarnessError, match="missing"):
+        do_run("success", phase=1)
+    path.write_text("{not json")
+    with pytest.raises(HarnessError, match="cannot be read"):
+        do_run("success", phase=1)
+
+
+def test_phase_is_refused_for_a_variant_not_in_the_manifest(do_run, root, task_dir):
+    phase_setup(root, task_dir)
+    with pytest.raises(HarnessError, match="variant plumbed"):
+        do_run("success", variant="plumbed", phase=1)
+
+
+def test_phase_is_refused_for_another_phase_or_a_task_that_changed_since_the_lock(do_run, root, task_dir):
+    phase_setup(root, task_dir)
+    with pytest.raises(HarnessError, match="phase-2.json does not exist"):
+        do_run("success", phase=2)
+    (task_dir / "PROMPT.md").write_text("edited after the lock\n")
+    with pytest.raises(HarnessError, match="differs from tasks/LOCK.json"):
+        do_run("success", phase=1)

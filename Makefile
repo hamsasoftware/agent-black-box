@@ -9,6 +9,7 @@ TASK ?=
 VARIANT ?= bare
 MODEL ?=
 BUDGET ?=
+PHASE ?=
 
 .PHONY: help setup test scan lint facts run-task report labels clean
 
@@ -17,7 +18,7 @@ help: ## List the available commands
 	@echo
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo
-	@echo "Variables: TASK=<task-id>  VARIANT=bare|plumbed (default bare)  MODEL=<model-id>  BUDGET=<usd, optional>"
+	@echo "Variables: TASK=<task-id>  VARIANT=bare|plumbed (default bare)  MODEL=<model-id>  BUDGET=<usd, optional>  PHASE=<n, optional; a phase run>"
 
 setup: ## Create .venv and install the project with its dev tools
 	$(PYTHON) -m venv $(VENV)
@@ -56,13 +57,13 @@ lint: ## Validate YAML, JSON and issue forms; run ruff when installed
 facts: ## Refresh the numbers in README.md from the data
 	$(PY) scripts/update_readme_facts.py write
 
-run-task: ## Run one task for real: make run-task TASK=<id> VARIANT=bare|plumbed MODEL=<model-id> [BUDGET=<usd>] (spends money)
+run-task: ## Run one task for real: make run-task TASK=<id> VARIANT=bare|plumbed MODEL=<model-id> [BUDGET=<usd>] [PHASE=<n>] (spends money)
 	@if [ -z "$(TASK)" ]; then echo "Set TASK=<task-id>. Available:"; ls tasks 2>/dev/null || echo "  (no tasks yet)"; exit 2; fi
 	@case "$(VARIANT)" in bare|plumbed) ;; *) echo "VARIANT must be bare or plumbed"; exit 2;; esac
 	@if [ -z "$(MODEL)" ]; then echo "Set MODEL=<model-id>. The run spends real money on that model."; exit 2; fi
 	@if [ ! -d "tasks/$(TASK)" ]; then echo "No such task: tasks/$(TASK)"; exit 2; fi
 	@if [ ! -d src/blackbox ]; then echo "The harness (src/blackbox) is not installed yet."; exit 2; fi
-	$(PY) -m blackbox run --task "$(TASK)" --variant "$(VARIANT)" --model "$(MODEL)"$(if $(BUDGET), --budget-usd "$(BUDGET)")
+	$(PY) -m blackbox run --task "$(TASK)" --variant "$(VARIANT)" --model "$(MODEL)"$(if $(BUDGET), --budget-usd "$(BUDGET)")$(if $(PHASE), --phase "$(PHASE)")
 
 report: ## Summarise recorded runs from runs/index.jsonl
 	@if [ ! -d src/blackbox ]; then echo "The harness (src/blackbox) is not installed yet."; exit 2; fi
