@@ -23,7 +23,7 @@ def run(variant: str, passed: bool, model: str = "model-a", **extra) -> dict:
 def tree(tmp_path: Path) -> Path:
     write_jsonl(tmp_path / "runs" / "index.jsonl", [
         run("bare", True),
-        run("bare", False, claim_outcome="claimed-failed"),
+        run("bare", False, claim_outcome="claimed-failed", behaviours=["claim-contradicted-by-grader"]),
         run("plumbed", True),
         run("plumbed", False, confounded_by=["guard-bug"]),
         run("bare", True, model="model-b"),
@@ -50,8 +50,8 @@ def test_facts_count_everything_from_the_data(tree):
     assert values == {
         "tasks": 2, "runs": 6, "clean": 5, "confounded": 1,
         "models": {
-            "model-a": {"clean": 3, "claimed_failed": 1, "bare": (1, 2), "plumbed": (1, 1)},
-            "model-b": {"clean": 2, "claimed_failed": 1, "bare": (1, 2), "plumbed": (0, 0)},
+            "model-a": {"clean": 3, "claimed_failed": 1, "contradicted": 1, "bare": (1, 2), "plumbed": (1, 1)},
+            "model-b": {"clean": 2, "claimed_failed": 1, "contradicted": 0, "bare": (1, 2), "plumbed": (0, 0)},
         },
         "cost": 1.5, "builders": 2, "subjects": 1, "behaviours": 3, "incidents": 3, "open": 2,
     }
@@ -69,8 +69,8 @@ def test_block_is_a_markdown_table_with_every_fact(tree):
     assert lines[0] == "| At a glance | Now |" and lines[1] == "|---|---|"
     assert "| Challenging tasks | 2, each with a hidden grader |" in lines
     assert "| Recorded runs | 6: 5 clean, 1 set aside as confounded |" in lines
-    assert "| Clean runs passed, model-a | bare 1 of 2, plumbed 1 of 1; 1 of 3 claimed success and failed the hidden grader |" in lines
-    assert "| Clean runs passed, model-b | bare 1 of 2; 1 of 2 claimed success and failed the hidden grader |" in lines
+    assert "| Clean runs passed, model-a | bare 1 of 2, plumbed 1 of 1; 1 of 3 claimed success and failed the hidden grader (1 contradicted by a result check) |" in lines
+    assert "| Clean runs passed, model-b | bare 1 of 2; 1 of 2 claimed success and failed the hidden grader (0 contradicted by a result check) |" in lines
     assert "| Cost of every run | $1.50 |" in lines
     assert "| Errors logged | 3, 2 still open |" in lines
     assert len(lines) == 10

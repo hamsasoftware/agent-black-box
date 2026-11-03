@@ -8,14 +8,14 @@ Pass rates, means and behaviour counts use clean runs only. A run is confounded 
 
 ## By model
 
-Clean runs only, one line per model and variant. Models are never pooled: each model has its own rows below.
+Clean runs only, one line per model and variant. Models are never pooled: each model has its own rows below. "Claimed success, failed grader" counts any failed check, including a rule such as unchanged tests or allowed files; the last column counts only runs where a result check contradicted what the agent said.
 
-| Model | Variant | Clean runs | Pass rate | Mean cost (USD) | Claimed success, failed grader |
-|---|---|---|---|---|---|
-| claude-fable-5-1 | bare | 12 | 6/12 (50%) | 0.6480 | 3 |
-| claude-haiku-5-5 | bare | 27 | 22/27 (81%) | 0.0097 | 4 |
-| claude-sonnet-5-5 | bare | 32 | 27/32 (84%) | 0.0848 | 5 |
-| claude-sonnet-5-5 | plumbed | 31 | 26/31 (84%) | 0.0803 | 4 |
+| Model | Variant | Clean runs | Pass rate | Mean cost (USD) | Claimed success, failed grader | Of those, claim contradicted by a result check |
+|---|---|---|---|---|---|---|
+| claude-fable-5-1 | bare | 12 | 6/12 (50%) | 0.6480 | 3 | 1 |
+| claude-haiku-5-5 | bare | 27 | 22/27 (81%) | 0.0097 | 4 | 2 |
+| claude-sonnet-5-5 | bare | 32 | 27/32 (84%) | 0.0848 | 5 | 4 |
+| claude-sonnet-5-5 | plumbed | 31 | 26/31 (84%) | 0.0803 | 4 | 4 |
 
 ## By task
 

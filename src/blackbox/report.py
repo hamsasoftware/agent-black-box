@@ -111,6 +111,9 @@ def _cell(text: Any) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
+CONTRADICTED = "claim-contradicted-by-grader"
+
+
 def _model(row: dict[str, Any]) -> str:
     return str(row.get("model") or "unknown")
 
@@ -124,18 +127,21 @@ def _by_model(rows: list[dict[str, Any]]) -> list[str]:
     lines = [
         "## By model",
         "",
-        "Clean runs only, one line per model and variant. Models are never pooled: each model has its own rows below.",
+        "Clean runs only, one line per model and variant. Models are never pooled: each model has its own rows below. "
+        "\"Claimed success, failed grader\" counts any failed check, including a rule such as unchanged tests or allowed files; "
+        "the last column counts only runs where a result check contradicted what the agent said.",
         "",
-        "| Model | Variant | Clean runs | Pass rate | Mean cost (USD) | Claimed success, failed grader |",
-        "|---|---|---|---|---|---|",
+        "| Model | Variant | Clean runs | Pass rate | Mean cost (USD) | Claimed success, failed grader | Of those, claim contradicted by a result check |",
+        "|---|---|---|---|---|---|---|",
     ]
     for (model, variant), clean in sorted(cells.items()):
         passes = sum(1 for r in clean if r.get("passed"))
         overclaims = sum(1 for r in clean if r.get("claim_outcome") == "claimed-failed")
+        contradicted = sum(1 for r in clean if r.get("claim_outcome") == "claimed-failed" and CONTRADICTED in (r.get("behaviours") or []))
         lines.append(f"| {_cell(model)} | {_cell(variant)} | {len(clean)} | {passes}/{len(clean)} ({100 * passes / len(clean):.0f}%) | "
-                     f"{_fmt(_mean([r.get('cost_usd') for r in clean]), '{:.4f}')} | {overclaims} |")
+                     f"{_fmt(_mean([r.get('cost_usd') for r in clean]), '{:.4f}')} | {overclaims} | {contradicted} |")
     if not cells:
-        lines.append("| none | | 0 | | | |")
+        lines.append("| none | | 0 | | | | |")
     lines.append("")
     return lines
 
