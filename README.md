@@ -16,7 +16,7 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | Clean runs passed, claude-haiku-5-5, exploratory | bare 22 of 27; claim figures unaudited |
 | Clean runs passed, claude-sonnet-5-5, exploratory | bare 27 of 32, plumbed 26 of 31; claim figures unaudited |
 | Cost of every run | $14.54 |
-| Agents on the ledger | 4 builders, 115 subjects |
+| Agents on the ledger | 4 builders, 160 subjects |
 | Behaviours catalogued | 23 |
 | Errors logged | 46, 13 still open |
 <!-- facts:end -->
