@@ -19,7 +19,7 @@ scope:
   - "tests/*"
   - "SUMMARY.md"
 version: 3
-frozen: false
+frozen: true
 rules:
 - id: scope
   text: 'Change only these files: files under `depres/`, files under `tests/`, and `SUMMARY.md`. If something else
