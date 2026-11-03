@@ -16,3 +16,15 @@ Gate G3 of docs/protocol.md. Pilot runs are exploratory: they were made with the
 - Verdict: rejected
 
 An unfair verdict means the task changes, its version increases and G3 restarts. Required before v3: state in `docs/RANGES.md` whether `*` and the empty range match prereleases, then re-pilot.
+
+## v3
+
+- Model: Haiku, bare variant, 5 runs, 2026-11-03.
+- Runs: `20261103T201127Z-semver-ranges-bare-birch-11`, `20261103T201301Z-semver-ranges-bare-cinder-11`, `20261103T201423Z-semver-ranges-bare-dune-11`, `20261103T201601Z-semver-ranges-bare-elm-11`, `20261103T201738Z-semver-ranges-bare-flint-11`.
+- Passed: 4 of 5.
+
+### Failed required checks
+
+- `20261103T201127Z-semver-ranges-bare-birch-11` `hidden-range-cases` (range `01.2.3` expected to raise `ValueError`): **justified**. The contract says an invalid range or invalid version raises `ValueError` and that `Version` is already correct. `Version` rejects leading zeros, while the run parses range numbers with `\d+` and so accepts `01`. Confirmed in the run's diff.patch. The v2 unfair check (`*` and prereleases) did not fail in any v3 run.
+
+- Verdict: approved
