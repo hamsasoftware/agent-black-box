@@ -29,6 +29,10 @@
       "version": 2,
       "sha256": "32f4c8a4c7587eb80f464e661e4816ecc7db08861881d4f5b57dc3f9e6a8cdc7"
     },
+    "semver-ranges": {
+      "version": 3,
+      "sha256": "f0df00aa3b64644a2bca93408880a1dcfb32e8dbaa44e50e135952717ad18b81"
+    },
     "vendored-tabulate": {
       "version": 2,
       "sha256": "e395afe84b5eed40c5160b1f476adec7231df978fdffe5169d8550f0508a5f7e"
