@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+CLASSIFIER = "claim-classifier"
+CONTRADICTED = "claim-contradicted-by-grader"
 START = "<!-- facts:start -->"
 END = "<!-- facts:end -->"
 
@@ -23,7 +25,22 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def facts(root: Path = ROOT) -> dict:
+def audit_states(root: Path = ROOT) -> dict[str, str]:
+    """Audit state of the claim classifier and the contradicted-claim tag (docs/protocol.md section 7)."""
+    src = str(ROOT / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    from blackbox import audit
+
+    rows, audits = audit.load_index(root), audit.load_audits(root)
+    return {tag: audit.tag_status(tag, rows, audits, audit.fingerprint(tag, root)).state for tag in (CLASSIFIER, CONTRADICTED)}
+
+
+def facts(root: Path = ROOT, states: dict | None = None) -> dict:
+    """`states` maps a tag to its audit state; by default it is read from ledger/audits.jsonl."""
+    states = audit_states(root) if states is None else states
+    classified = states.get(CLASSIFIER) == "passed"
+    contradicted_ok = classified and states.get(CONTRADICTED) == "passed"
     runs = read_jsonl(root / "runs" / "index.jsonl")
     clean = [run for run in runs if not run.get("confounded_by")]
     models: dict[str, dict] = {}
@@ -33,8 +50,9 @@ def facts(root: Path = ROOT) -> dict:
     for model, how in sorted({(run.get("model") or "unknown", basis(run)) for run in clean}):
         mine = [run for run in clean if (run.get("model") or "unknown") == model and basis(run) == how]
         claimed_failed = [run for run in mine if run.get("claim_outcome") == "claimed-failed"]
-        entry = {"clean": len(mine), "claimed_failed": len(claimed_failed),
-                 "contradicted": sum(1 for run in claimed_failed if "claim-contradicted-by-grader" in (run.get("behaviours") or []))}
+        contradicted = sum(1 for run in claimed_failed if CONTRADICTED in (run.get("behaviours") or []))
+        entry = {"clean": len(mine), "claimed_failed": len(claimed_failed) if classified else None,
+                 "contradicted": contradicted if contradicted_ok else None}
         for variant in ("bare", "plumbed"):
             picked = [run for run in mine if run["variant"] == variant]
             entry[variant] = (sum(1 for run in picked if run["passed"]), len(picked))
@@ -61,8 +79,10 @@ def facts(root: Path = ROOT) -> dict:
 
 def passed_text(entry: dict) -> str:
     parts = [f"{variant} {entry[variant][0]} of {entry[variant][1]}" for variant in ("bare", "plumbed") if entry[variant][1]]
-    return (f"{', '.join(parts)}; {entry['claimed_failed']} of {entry['clean']} claimed success and failed the hidden grader "
-            f"({entry['contradicted']} contradicted by a result check)")
+    if entry["claimed_failed"] is None:
+        return f"{', '.join(parts)}; claim figures unaudited"
+    contradicted = "contradicted by a result check: unaudited" if entry["contradicted"] is None else f"{entry['contradicted']} contradicted by a result check"
+    return f"{', '.join(parts)}; {entry['claimed_failed']} of {entry['clean']} claimed success and failed the hidden grader ({contradicted})"
 
 
 def block(values: dict) -> str:
