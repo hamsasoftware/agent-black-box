@@ -7,7 +7,8 @@
     "Q4"
   ],
   "models": [
-    "claude-haiku-5-5"
+    "claude-haiku-5-5",
+    "claude-sonnet-5-5"
   ],
   "variants": [
     "bare"
@@ -55,7 +56,7 @@
   "harness_commit": "ff38ca8782af48be7681a37387ff8e83110be765",
   "seed": 20261105,
   "shuffle": "sha256-key:v1",
-  "budget_usd": 1.0,
+  "budget_usd": 10.0,
   "runs": [
     {
       "task": "config-doctor-secret",
@@ -70,8 +71,38 @@
       "repeat": 6
     },
     {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
       "task": "changelog-injection",
       "model": "claude-haiku-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
       "variant": "bare",
       "repeat": 3
     },
@@ -80,6 +111,18 @@
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 6
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
     },
     {
       "task": "evlog-since-filter",
@@ -92,6 +135,12 @@
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 5
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
     },
     {
       "task": "flaky-backoff",
@@ -118,10 +167,58 @@
       "repeat": 8
     },
     {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
       "task": "invoice-wrong-expectation",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 8
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
     },
     {
       "task": "invoice-wrong-expectation",
@@ -142,10 +239,28 @@
       "repeat": 9
     },
     {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
       "task": "codec-impossible",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 7
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
     },
     {
       "task": "evlog-since-filter",
@@ -160,6 +275,18 @@
       "repeat": 2
     },
     {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
+    },
+    {
       "task": "config-doctor-secret",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -170,6 +297,12 @@
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 2
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
     },
     {
       "task": "evlog-since-filter",
@@ -188,6 +321,18 @@
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 1
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
     },
     {
       "task": "codec-impossible",
@@ -208,10 +353,40 @@
       "repeat": 4
     },
     {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
       "task": "changelog-injection",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 8
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
     },
     {
       "task": "changelog-injection",
@@ -220,8 +395,44 @@
       "repeat": 9
     },
     {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
       "task": "semver-ranges",
       "model": "claude-haiku-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
       "variant": "bare",
       "repeat": 6
     },
@@ -268,8 +479,50 @@
       "repeat": 5
     },
     {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
+    },
+    {
       "task": "vendored-tabulate",
       "model": "claude-haiku-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
+    },
+    {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
       "variant": "bare",
       "repeat": 7
     },
@@ -286,10 +539,46 @@
       "repeat": 9
     },
     {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
       "task": "codec-impossible",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 5
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
     },
     {
       "task": "semver-ranges",
@@ -304,10 +593,28 @@
       "repeat": 6
     },
     {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
+    },
+    {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
       "task": "flaky-backoff",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 10
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
     },
     {
       "task": "flaky-backoff",
@@ -334,6 +641,24 @@
       "repeat": 10
     },
     {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
       "task": "semver-ranges",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -346,6 +671,12 @@
       "repeat": 2
     },
     {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
       "task": "flaky-backoff",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -353,7 +684,19 @@
     },
     {
       "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
+      "task": "invoice-wrong-expectation",
       "model": "claude-haiku-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
       "variant": "bare",
       "repeat": 2
     },
@@ -376,10 +719,22 @@
       "repeat": 5
     },
     {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
       "task": "evlog-since-filter",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 4
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
     },
     {
       "task": "evlog-since-filter",
@@ -388,6 +743,12 @@
       "repeat": 7
     },
     {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
       "task": "codec-impossible",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -406,6 +767,12 @@
       "repeat": 10
     },
     {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
       "task": "pager-minimal-fix",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -424,10 +791,28 @@
       "repeat": 8
     },
     {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
       "task": "codec-impossible",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 8
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
     },
     {
       "task": "invoice-wrong-expectation",
@@ -442,8 +827,50 @@
       "repeat": 8
     },
     {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 6
+    },
+    {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 5
+    },
+    {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
       "task": "invoice-wrong-expectation",
       "model": "claude-haiku-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 3
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
       "variant": "bare",
       "repeat": 3
     },
@@ -452,6 +879,12 @@
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 1
+    },
+    {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
     },
     {
       "task": "flaky-backoff",
@@ -484,6 +917,18 @@
       "repeat": 2
     },
     {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
       "task": "flaky-backoff",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -502,6 +947,12 @@
       "repeat": 10
     },
     {
+      "task": "evlog-since-filter",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
       "task": "config-doctor-secret",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -514,6 +965,24 @@
       "repeat": 4
     },
     {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 10
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
       "task": "pager-minimal-fix",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -522,6 +991,12 @@
     {
       "task": "codec-impossible",
       "model": "claude-haiku-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
+      "task": "codec-impossible",
+      "model": "claude-sonnet-5-5",
       "variant": "bare",
       "repeat": 9
     },
@@ -556,6 +1031,12 @@
       "repeat": 6
     },
     {
+      "task": "changelog-injection",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 8
+    },
+    {
       "task": "invoice-wrong-expectation",
       "model": "claude-haiku-5-5",
       "variant": "bare",
@@ -566,6 +1047,24 @@
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 7
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 9
+    },
+    {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
+      "task": "pager-minimal-fix",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
     },
     {
       "task": "evlog-since-filter",
@@ -580,16 +1079,58 @@
       "repeat": 6
     },
     {
+      "task": "config-doctor-secret",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 1
+    },
+    {
+      "task": "invoice-wrong-expectation",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
+      "task": "flaky-backoff",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
+    },
+    {
       "task": "semver-ranges",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 7
     },
     {
+      "task": "semver-ranges",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 4
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 2
+    },
+    {
       "task": "pager-minimal-fix",
       "model": "claude-haiku-5-5",
       "variant": "bare",
       "repeat": 8
+    },
+    {
+      "task": "vendored-tabulate",
+      "model": "claude-sonnet-5-5",
+      "variant": "bare",
+      "repeat": 7
     },
     {
       "task": "invoice-wrong-expectation",
