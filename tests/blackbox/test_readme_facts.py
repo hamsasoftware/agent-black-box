@@ -134,8 +134,8 @@ def test_the_real_readme_is_current():
 def test_protocol_runs_are_counted_apart_from_exploratory_runs(tmp_path):
     write_jsonl(tmp_path / "runs" / "index.jsonl", [
         run("bare", True),
-        run("bare", False, protocol_version=1, task_version=2),
-        run("bare", True, protocol_version=1, task_version=2),
+        run("bare", False, protocol_version=1, phase=1, task_version=2),
+        run("bare", True, protocol_version=1, phase=1, task_version=2),
     ])
     models = readme_facts.facts(tmp_path)["models"]
     assert models["model-a, exploratory"]["bare"] == (1, 1)
@@ -172,3 +172,14 @@ def test_the_real_readme_facts_are_gated_on_the_real_audit_ledger():
     if states.get("claim-classifier") != "passed":
         assert all(m["claimed_failed"] is None for m in values["models"].values())
         assert "claimed success" not in readme_facts.block(values)
+
+
+def test_a_protocol_version_without_a_phase_is_exploratory_in_the_readme_facts(tmp_path):
+    write_jsonl(tmp_path / "runs" / "index.jsonl", [
+        run("bare", True),
+        run("bare", False, protocol_version=1, task_version=2),
+        run("bare", True, protocol_version=1, phase=1, task_version=2),
+    ])
+    models = readme_facts.facts(tmp_path)["models"]
+    assert models["model-a, exploratory"]["bare"] == (1, 2)
+    assert models["model-a, protocol 1"]["bare"] == (1, 1)

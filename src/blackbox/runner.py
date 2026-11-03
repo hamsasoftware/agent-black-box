@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 import yaml
 
-from blackbox import behaviours, claims, confine, ledger, taxonomy, taskspec
+from blackbox import behaviours, claims, confine, ledger, phase as phase_mod, taxonomy, taskspec
 from blackbox.envfile import KEY_NAME, agent_env, clean_env, find_env_file, read_env_values
 from blackbox.redact import Redactor
 from blackbox.stream import Stream, parse_line
@@ -55,6 +55,7 @@ class RunOptions:
     sandbox: str = "auto"
     extra_env: dict[str, str] = field(default_factory=dict)
     view: Any = None
+    phase: int | None = None
 
 
 def utcnow() -> dt.datetime:
@@ -79,16 +80,61 @@ def load_task(task_dir: Path) -> dict[str, Any]:
     return task
 
 
+HARNESS_OUTPUT_PATHS = ("ledger", "runs")  # the harness rewrites these tracked paths after every run, so they never make it dirty
+
+
 def harness_commit(root: Path) -> str | None:
-    """The git commit of the harness checkout, with +dirty when tracked files differ from it. None outside a git checkout."""
+    """The git commit of the harness checkout, with +dirty when tracked files outside ledger/ and runs/ differ from it.
+    None outside a git checkout."""
     try:
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=30)
         if head.returncode != 0:
             return None
-        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root, capture_output=True, text=True, timeout=30)
+        spec = [".", *(f":(exclude){p}" for p in HARNESS_OUTPUT_PATHS)]
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no", "--", *spec], cwd=root,
+                                capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     return head.stdout.strip() + ("+dirty" if status.stdout.strip() else "")
+
+
+def phase_problems(root: Path, task_dir: Path, task: dict[str, Any], variant: str, model: str, n: int) -> list[str]:
+    """Why this run may not be stamped as a run of phase `n`. Empty when it may. Reads files and git only."""
+    tid, version = task["id"], task.get("version", 1)
+    if task.get("frozen") is not True:
+        return [f"task {tid} is a candidate (frozen: false); candidates and pilots are exploratory and cannot be run in a phase"]
+    lock_path = root / "tasks" / "LOCK.json"
+    try:
+        locked = json.loads(lock_path.read_text(encoding="utf-8")).get("tasks", {}) if lock_path.is_file() else {}
+    except (OSError, ValueError):
+        return ["tasks/LOCK.json cannot be read"]
+    entry = locked.get(tid)
+    if not isinstance(entry, dict):
+        return [f"task {tid} is not in tasks/LOCK.json"]
+    if (entry.get("version"), entry.get("sha256")) != (version, taskspec.task_sha256(task_dir)):
+        return [f"task {tid} v{version} differs from tasks/LOCK.json (version {entry.get('version')}, or edited since it was locked)"]
+    path = phase_mod.manifest_path(root, n)
+    if not path.is_file():
+        return [f"{path.relative_to(root)} does not exist; a phase run needs a merged manifest"]
+    try:
+        m = phase_mod.read_manifest(path)
+    except (OSError, ValueError) as exc:
+        return [f"{path.relative_to(root)} cannot be read: {exc}"]
+    found = phase_mod.structure_problems(m, root)
+    if found:
+        return [f"{path.relative_to(root)}: {p}" for p in found]
+    if m["phase"] != n:
+        return [f"{path.relative_to(root)} is for phase {m['phase']}, not {n}"]
+    listed = m["tasks"].get(tid)
+    if listed is None:
+        return [f"task {tid} is not in the manifest of phase {n}"]
+    if (listed["version"], listed["sha256"]) != (entry["version"], entry["sha256"]):
+        return [f"task {tid} is listed in the manifest of phase {n} at another version or hash than tasks/LOCK.json"]
+    if model not in m["models"]:
+        return [f"model {model} is not in the manifest of phase {n}"]
+    if (model, variant) not in phase_mod.variant_pairs(m["models"], m["variants"], m.get("plumbed_model")):
+        return [f"variant {variant} for model {model} is not in the manifest of phase {n}"]
+    return []
 
 
 def default_plumbing_dir(root: Path) -> Path:
@@ -265,6 +311,12 @@ def run(opts: RunOptions) -> Path:
     task = load_task(task_dir)
     if opts.variant not in ("bare", "plumbed"):
         raise HarnessError("variant must be bare or plumbed")
+    protocol_version = None
+    if opts.phase is not None:
+        found = phase_problems(root, task_dir, task, opts.variant, opts.model, opts.phase)
+        if found:
+            raise HarnessError(f"--phase {opts.phase} refused, nothing was run: " + "; ".join(found))
+        protocol_version = phase_mod.read_manifest(phase_mod.manifest_path(root, opts.phase))["protocol_version"]
     plumbing = (opts.plumbing_dir or default_plumbing_dir(root)).resolve() if opts.variant == "plumbed" else None
     env_path = find_env_file(opts.env_file)
     if env_path is None:
@@ -378,7 +430,8 @@ def run(opts: RunOptions) -> Path:
             "task_version": task.get("version", 1),
             "task_sha256": taskspec.task_sha256(task_dir),
             "harness_commit": harness_commit(root),
-            "protocol_version": taskspec.PROTOCOL_VERSION if task.get("version", 1) >= 2 else None,
+            "protocol_version": protocol_version,
+            "phase": opts.phase,
             "started_at": iso(started),
             "ended_at": iso(ended),
             "duration_ms": duration_ms,

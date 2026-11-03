@@ -80,7 +80,7 @@ def index_row(r: dict[str, Any], confounded_by: list[str] | None = None) -> dict
     return {
         "run_id": r["run_id"], "task_id": r.get("task_id"), "variant": r.get("variant"), "model": r.get("model"),
         "agent_id": r.get("agent_id"), "agent_name": r.get("agent_name"), "started_at": r.get("started_at"),
-        "task_version": r.get("task_version") or 1, "protocol_version": r.get("protocol_version"),
+        "task_version": r.get("task_version") or 1, "protocol_version": r.get("protocol_version"), "phase": r.get("phase"),
         "passed": bool(grade.get("passed")), "score": grade.get("score"), "cost_usd": r.get("cost_usd"),
         "input_tokens": r.get("input_tokens"), "output_tokens": r.get("output_tokens"),
         "cache_read_tokens": r.get("cache_read_tokens"), "cache_creation_tokens": r.get("cache_creation_tokens"),
@@ -121,8 +121,9 @@ def _version(row: dict[str, Any]) -> str:
 
 
 def _basis(row: dict[str, Any]) -> str:
-    """Runs made under a protocol version, or exploratory runs made before one existed."""
-    return f"protocol {row['protocol_version']}" if row.get("protocol_version") else "exploratory"
+    """A run made under a protocol version in a phase (both stamps present). Anything else, including a run stamped with a
+    protocol version but no phase, is exploratory."""
+    return f"protocol {row['protocol_version']}" if row.get("protocol_version") and row.get("phase") else "exploratory"
 
 
 def _model(row: dict[str, Any]) -> str:

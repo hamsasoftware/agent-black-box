@@ -72,8 +72,9 @@ It uses ANSI codes only, with no extra dependencies. Lines are cut to the termin
 | `prompt_sha256` | SHA-256 of the compiled prompt sent: `PROMPT.md` followed by the task's "Rules for this task" block. |
 | `task_version` | Version of the task that was run. Version 1 is the unpinned exploratory form; pinned tasks start at 2. |
 | `task_sha256` | SHA-256 of the task's `task.yaml`, `PROMPT.md`, `NOTES.md`, `grader/` and `fixture/`. Compared with `tasks/LOCK.json`. |
-| `harness_commit` | Git commit of the harness checkout, with `+dirty` if tracked files differed from it. `null` outside a git checkout. |
-| `protocol_version` | Evaluation protocol version the run was made under (see [protocol](protocol.md)). `null` for exploratory runs. |
+| `harness_commit` | Git commit of the harness checkout, with `+dirty` if tracked files outside `ledger/` and `runs/` (the harness's own output) differed from it. `null` outside a git checkout. |
+| `protocol_version` | Evaluation protocol version the run was made under (see [protocol](protocol.md)). Set only on a run made with `--phase N`; `null` for exploratory runs, whatever the task version. Runs stamped before `phase` existed carry it without a phase and are exploratory: reports and the README facts count a run as a protocol run only when both fields are set. |
+| `phase` | N of `--phase N`: the run belongs to the phase of `protocol/phase-N.json`. `null` for exploratory runs; absent from older records. |
 | `started_at`, `ended_at` | UTC ISO 8601 with milliseconds, around the agent process only. |
 | `duration_ms` | Wall-clock time of the agent process. |
 | `turns` | `num_turns` from the final `result` event; without one, the number of distinct assistant message ids. |

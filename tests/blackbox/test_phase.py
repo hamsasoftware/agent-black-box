@@ -176,11 +176,55 @@ def test_no_manifests_passes(repo):
     assert pm.main(["check", "--root", str(repo)]) == 0
 
 
-def test_check_catches_a_stale_lock_after_the_manifest(repo):
+def test_check_catches_a_stale_lock_after_the_manifest_while_the_phase_is_unfinished(repo):
     make(repo)
     write_task(repo, "alpha", version=2, body="changed")
     write_lock(repo)
     assert any("alpha is recorded at v1" in p for p in pm.check(repo))
+
+
+def finish(repo, m):
+    write_index(repo, [index_row(m, r, i) for i, r in enumerate(m["runs"], 1)])
+
+
+def test_a_finished_phase_keeps_passing_after_a_task_is_raised_with_a_note(repo, capsys):
+    m = load(make(repo))
+    finish(repo, m)
+    write_task(repo, "alpha", version=2, body="changed")
+    write_lock(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "raise alpha")
+    assert pm.check(repo) == []
+    assert pm.main(["check", "--root", str(repo)]) == 0
+    out = capsys.readouterr().out
+    assert "note: phase 1 is complete" in out and "alpha" in out
+
+
+def test_a_committed_lock_change_is_checked_against_the_lock_at_the_manifest_commit(repo):
+    path = make(repo)
+    write_task(repo, "alpha", version=2, body="changed")
+    write_lock(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "raise alpha")
+    finish(repo, load(path))
+    assert pm.check(repo) == []
+    m = load(path)
+    m["tasks"]["alpha"]["sha256"] = "0" * 64
+    save(path, m)
+    assert any("alpha is recorded at v1" in p and "at harness_commit" in p for p in pm.check(repo))
+
+
+def test_a_task_missing_from_the_lock_at_the_manifest_commit_is_caught(repo):
+    path = make(repo)
+    write_task(repo, "gamma")
+    write_lock(repo)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "freeze gamma")
+    m = load(path)
+    m["tasks"]["gamma"] = {"version": 1, "sha256": pm.task_lock.current(repo)["gamma"]["sha256"]}
+    m["runs"] = phase.expected_runs(m)
+    save(path, m)
+    assert any("gamma is not in tasks/LOCK.json at harness_commit" in p for p in pm.check(repo))
 
 
 def test_check_catches_a_task_edited_without_relocking(repo):
@@ -282,7 +326,7 @@ def test_the_real_repository_has_a_schema_that_accepts_a_generated_manifest(repo
 def index_row(manifest, run, n, cost=1.0, **over):
     row = {"run_id": f"20261103T{n:06d}Z-{run['task']}-{run['variant']}-ember", "task_id": run["task"], "model": run["model"],
            "variant": run["variant"], "task_version": manifest["tasks"][run["task"]]["version"],
-           "protocol_version": manifest["protocol_version"], "cost_usd": cost, "confounded_by": [], "started_at": f"2026-11-03T00:00:{n % 60:02d}Z"}
+           "protocol_version": manifest["protocol_version"], "phase": manifest["phase"], "cost_usd": cost, "confounded_by": [], "started_at": f"2026-11-03T00:00:{n % 60:02d}Z"}
     row.update(over)
     return row
 
@@ -324,20 +368,33 @@ def test_phase_next_ignores_confounded_runs_for_progress_but_counts_their_cost(r
     assert "0 of 12 runs done" in out and "$3.0000" in out and "run 1 of 12" in out
 
 
-def test_phase_next_ignores_exploratory_other_version_and_other_cell_rows(repo, capsys):
+def test_phase_next_matches_by_phase_and_cell_not_by_heuristics(repo, capsys):
     m = load(make(repo))
     run = m["runs"][0]
-    write_index(repo, [index_row(m, run, 1, protocol_version=None), index_row(m, run, 2, task_version=9),
-                       index_row(m, run, 3, model="claude-other-1"), index_row(m, run, 4, task_id="ghost")])
+    write_index(repo, [index_row(m, run, 1, protocol_version=None, phase=None), index_row(m, run, 2, phase=2),
+                       index_row(m, run, 3, phase=True), index_row(m, run, 4, model="claude-other-1"), index_row(m, run, 5, task_id="ghost"),
+                       index_row(m, run, 6, task_version=9, protocol_version=None, phase=None)])
     assert nxt(repo) == 0
     assert "0 of 12 runs done" in capsys.readouterr().out
 
 
-def test_phase_next_since_keeps_an_earlier_phase_out(repo, capsys):
+def test_phase_next_counts_a_stamped_run_whatever_its_task_version_or_time(repo, capsys):
     m = load(make(repo))
-    write_index(repo, [index_row(m, m["runs"][0], 1, started_at="2026-11-01T00:00:00Z")])
-    assert nxt(repo, "--since", "2026-11-02T00:00:00Z") == 0
-    assert "0 of 12 runs done" in capsys.readouterr().out
+    write_index(repo, [index_row(m, m["runs"][0], 1, started_at="2020-01-01T00:00:00Z", task_version=1)])
+    assert nxt(repo) == 0
+    assert "1 of 12 runs done" in capsys.readouterr().out
+
+
+def test_phase_next_prints_the_phase_in_the_command(repo, capsys):
+    make(repo)
+    nxt(repo)
+    assert "--phase 1" in capsys.readouterr().out
+
+
+def test_since_is_gone(repo):
+    make(repo)
+    with pytest.raises(SystemExit):
+        nxt(repo, "--since", "2026-11-02T00:00:00Z")
 
 
 def test_phase_next_stops_at_the_budget_with_a_clear_message(repo, capsys):

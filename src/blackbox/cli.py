@@ -27,7 +27,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         plumbing_dir=Path(a.plumbing_dir) if a.plumbing_dir else None, root=Path(a.root),
         env_file=a.env_file, agent_cli=a.agent_cli, timeout_seconds=a.timeout,
         keep_workspace=a.keep_workspace, taxonomy_path=Path(a.taxonomy) if a.taxonomy else None,
-        sandbox=a.sandbox, view=LiveView() if a.live else None)
+        sandbox=a.sandbox, view=LiveView() if a.live else None, phase=a.phase)
     try:
         run_dir = run(opts)
     except HarnessError as exc:
@@ -159,7 +159,7 @@ def cmd_phase(a: argparse.Namespace) -> int:
         for line in problems:
             print(f"blackbox phase: {path.name}: {line}", file=sys.stderr)
         return 2
-    p = phase.progress(m, phase.index_rows(root), a.since)
+    p = phase.progress(m, phase.index_rows(root))
     print(f"phase {m['phase']}: {p['done']} of {p['total']} runs done; spent ${p['spent']:.4f} of ${p['budget']:.2f}")
     if p["next"] is None:
         print("phase complete: every run in the manifest has a clean run recorded")
@@ -170,7 +170,7 @@ def cmd_phase(a: argparse.Namespace) -> int:
         return 3
     n = p["next"]
     print(f"next: run {n['position']} of {p['total']}: task {n['task']}  model {n['model']}  variant {n['variant']}  repeat {n['repeat']}")
-    print(f"command (not run): python -m blackbox run --task {n['task']} --variant {n['variant']} --model {n['model']}")
+    print(f"command (not run): python -m blackbox run --task {n['task']} --variant {n['variant']} --model {n['model']} --phase {m['phase']}")
     return 0
 
 
@@ -193,6 +193,7 @@ def parser() -> argparse.ArgumentParser:
     sp.add_argument("--timeout", type=float, default=None, help="wall-clock seconds (default: task timeout_seconds)")
     sp.add_argument("--taxonomy", default=None)
     sp.add_argument("--keep-workspace", action="store_true")
+    sp.add_argument("--phase", type=int, default=None, help="stamp the run as a run of phase N; refused unless the task is frozen and locked and protocol/phase-N.json lists this task, model and variant (default: exploratory run)")
     sp.add_argument("--live", action="store_true", help="render a live view of the run in the terminal")
     sp.add_argument("--sandbox", choices=["auto", "required", "off"], default="auto",
                     help="bwrap confinement: auto uses it when it works, required fails without it")
@@ -268,7 +269,6 @@ def parser() -> argparse.ArgumentParser:
     psub = sp.add_subparsers(dest="phase_cmd", required=True)
     pp = psub.add_parser("next", help="print the next unfinished run and the spend against the budget; exit 3 once the budget is reached")
     pp.add_argument("--phase", type=int, required=True)
-    pp.add_argument("--since", default=None, help="count only runs started at or after this timestamp (ISO 8601), to keep an earlier phase's runs out")
     pp.add_argument("--root", default=".")
     sp.set_defaults(fn=cmd_phase)
     return p
