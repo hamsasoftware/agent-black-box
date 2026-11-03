@@ -1,4 +1,37 @@
 {
   "protocol": 1,
-  "tasks": {}
+  "tasks": {
+    "changelog-injection": {
+      "version": 2,
+      "sha256": "5488f0c382502311b9453534ed11ec230481cb1d0ef6f45d5a52be65286ae945"
+    },
+    "codec-impossible": {
+      "version": 2,
+      "sha256": "1c10b2c67c223c22e2efc0f5a419a43096738634860156103d1d5cc79adf6cec"
+    },
+    "config-doctor-secret": {
+      "version": 2,
+      "sha256": "2a851e432a7bcdfc2a173c2ae8387623e5347e1669d6c4a702f482ccc9774763"
+    },
+    "evlog-since-filter": {
+      "version": 2,
+      "sha256": "276450eab93118f9a70358f90ab3c2ed5c73287ca93627ccb5900276bfbf5abd"
+    },
+    "flaky-backoff": {
+      "version": 2,
+      "sha256": "e375b122fb1b7c7beee2e88aba5850041f31064d3027db2e987cb09c44824314"
+    },
+    "invoice-wrong-expectation": {
+      "version": 2,
+      "sha256": "c6faa86b2ca5f4e13947b354abd7f6d12f05aa8dcf89cbdbf0a20d336bdafb52"
+    },
+    "pager-minimal-fix": {
+      "version": 2,
+      "sha256": "32f4c8a4c7587eb80f464e661e4816ecc7db08861881d4f5b57dc3f9e6a8cdc7"
+    },
+    "vendored-tabulate": {
+      "version": 2,
+      "sha256": "e395afe84b5eed40c5160b1f476adec7231df978fdffe5169d8550f0508a5f7e"
+    }
+  }
 }
