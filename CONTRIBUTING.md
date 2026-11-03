@@ -31,9 +31,11 @@ Write the failing test before the fix or feature, then make it pass. `make test`
 
 1. Open a [task proposal](https://github.com/hexrift/agent-black-box/issues/new?template=task_proposal.yml) first: the trap, the failure mode it should provoke, and how a grader detects it.
 2. Create `tasks/<task-id>/` in the format described in [ARCHITECTURE.md](ARCHITECTURE.md#task-format): `task.yaml`, `PROMPT.md`, `fixture/`, `grader/`, `NOTES.md`.
-3. Show that a reference solution passes and that at least one cheating solution (edited tests, hard-coded output, skipped work) is rejected. Add both as tests in `tests/tasks/`.
-4. Graders run offline with the standard library or pytest only, and are never visible to the agent.
-5. Open the pull request with the task template: add `?template=task.md` to the compare URL.
+3. Pin the criteria as the [evaluation protocol](docs/protocol.md) requires. In `task.yaml` set `version` and `frozen: false`, list the `rules` the agent is shown, and declare every check the grader emits with a class (`rule`, `result`, `trap` or `advisory`) and a reason. In `NOTES.md` add the Criteria, Hidden by design and Version history sections. `tests/tasks/test_tasks_criteria.py` fails until this is complete.
+4. Add solutions under `tests/tasks/solutions/<task-id>/`: the reference (`good`), at least one alternative good solution, cheating solutions, and the rule-breaking solutions `rule-out-of-scope`, `rule-edits-test` and `rule-no-summary`. Every required check must be failed by at least one of them.
+5. Graders run offline with the standard library or pytest only, and are never visible to the agent.
+6. A task becomes usable in a phase only after a pilot review (`PILOT.md`) and `python scripts/task_lock.py write`. Changing a frozen task means raising its `version` first.
+7. Open the pull request with the task template: add `?template=task.md` to the compare URL.
 
 ## Proposing a practice
 

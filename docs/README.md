@@ -14,6 +14,7 @@ Every document in this repository, what it is for and who should read it. Docume
 | Document | What it is | For |
 |---|---|---|
 | [ARCHITECTURE](../ARCHITECTURE.md) | Modules and owners, task format, run ledger fields, safety rules | Contributors, reviewers |
+| [Evaluation protocol](protocol.md) | What is measured, how a task becomes usable, how a phase runs and what a report may claim | Researchers, reviewers, task authors |
 | [Ledger and run format](ledger.md) | How the harness records, redacts, grades and replays a run | Anyone reading run data |
 | [Model choice](model-choice.md) | Which subject model is used and why | Researchers |
 | [Agent plumbing](plumbing.md) | Each plumbing file, the practice it implements, its sources and limits, and how its effect is measured | Practitioners, researchers |

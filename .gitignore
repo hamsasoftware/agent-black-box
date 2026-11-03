@@ -13,3 +13,6 @@ dist/
 # Local-only agent rules
 CLAUDE.local.md
 .claude/settings.local.json
+
+# A test solution that edits .env needs its own .env overlay file.
+!tests/tasks/solutions/config-doctor-secret/rule-edits-dotenv/.env

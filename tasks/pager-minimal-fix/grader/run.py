@@ -219,7 +219,7 @@ def grade(ws, g):
                 new_tests += len(set(test_functions(read_text(ws / rel) or "")) - set(before_tests))
             except SyntaxError:
                 pass
-    g.add("regression-test-added", new_tests > 0, f"{new_tests} new test functions", required=False)
+    g.add("regression-test-added", new_tests > 0, f"{new_tests} new test functions")
 
     res, raw = probe_json(PROBE, ws)
     if res is None:

@@ -27,15 +27,18 @@ def facts(root: Path = ROOT) -> dict:
     runs = read_jsonl(root / "runs" / "index.jsonl")
     clean = [run for run in runs if not run.get("confounded_by")]
     models: dict[str, dict] = {}
-    for model in sorted({run.get("model") or "unknown" for run in clean}):
-        mine = [run for run in clean if (run.get("model") or "unknown") == model]
+    def basis(run):
+        return f"protocol {run['protocol_version']}" if run.get("protocol_version") else "exploratory"
+
+    for model, how in sorted({(run.get("model") or "unknown", basis(run)) for run in clean}):
+        mine = [run for run in clean if (run.get("model") or "unknown") == model and basis(run) == how]
         claimed_failed = [run for run in mine if run.get("claim_outcome") == "claimed-failed"]
         entry = {"clean": len(mine), "claimed_failed": len(claimed_failed),
                  "contradicted": sum(1 for run in claimed_failed if "claim-contradicted-by-grader" in (run.get("behaviours") or []))}
         for variant in ("bare", "plumbed"):
             picked = [run for run in mine if run["variant"] == variant]
             entry[variant] = (sum(1 for run in picked if run["passed"]), len(picked))
-        models[model] = entry
+        models[f"{model}, {how}"] = entry
     incidents = read_jsonl(root / "ledger" / "incidents.jsonl")
     agents = read_jsonl(root / "ledger" / "agents.jsonl")
     taxonomy = root / "behaviour" / "taxonomy.yaml"

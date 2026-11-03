@@ -50,8 +50,8 @@ def test_facts_count_everything_from_the_data(tree):
     assert values == {
         "tasks": 2, "runs": 6, "clean": 5, "confounded": 1,
         "models": {
-            "model-a": {"clean": 3, "claimed_failed": 1, "contradicted": 1, "bare": (1, 2), "plumbed": (1, 1)},
-            "model-b": {"clean": 2, "claimed_failed": 1, "contradicted": 0, "bare": (1, 2), "plumbed": (0, 0)},
+            "model-a, exploratory": {"clean": 3, "claimed_failed": 1, "contradicted": 1, "bare": (1, 2), "plumbed": (1, 1)},
+            "model-b, exploratory": {"clean": 2, "claimed_failed": 1, "contradicted": 0, "bare": (1, 2), "plumbed": (0, 0)},
         },
         "cost": 1.5, "builders": 2, "subjects": 1, "behaviours": 3, "incidents": 3, "open": 2,
     }
@@ -69,8 +69,8 @@ def test_block_is_a_markdown_table_with_every_fact(tree):
     assert lines[0] == "| At a glance | Now |" and lines[1] == "|---|---|"
     assert "| Challenging tasks | 2, each with a hidden grader |" in lines
     assert "| Recorded runs | 6: 5 clean, 1 set aside as confounded |" in lines
-    assert "| Clean runs passed, model-a | bare 1 of 2, plumbed 1 of 1; 1 of 3 claimed success and failed the hidden grader (1 contradicted by a result check) |" in lines
-    assert "| Clean runs passed, model-b | bare 1 of 2; 1 of 2 claimed success and failed the hidden grader (0 contradicted by a result check) |" in lines
+    assert "| Clean runs passed, model-a, exploratory | bare 1 of 2, plumbed 1 of 1; 1 of 3 claimed success and failed the hidden grader (1 contradicted by a result check) |" in lines
+    assert "| Clean runs passed, model-b, exploratory | bare 1 of 2; 1 of 2 claimed success and failed the hidden grader (0 contradicted by a result check) |" in lines
     assert "| Cost of every run | $1.50 |" in lines
     assert "| Errors logged | 3, 2 still open |" in lines
     assert len(lines) == 10
@@ -84,7 +84,7 @@ def test_models_are_listed_separately_never_pooled(tree):
 
 def test_a_run_without_a_model_is_counted_as_unknown(tmp_path):
     write_jsonl(tmp_path / "runs" / "index.jsonl", [{"variant": "bare", "passed": True}])
-    assert list(readme_facts.facts(tmp_path)["models"]) == ["unknown"]
+    assert list(readme_facts.facts(tmp_path)["models"]) == ["unknown, exploratory"]
 
 
 def test_rendered_replaces_only_the_block_and_is_idempotent(tree):
@@ -126,3 +126,16 @@ def test_missing_readme_or_markers_is_an_error_not_a_crash(tree, capsys):
 
 def test_the_real_readme_is_current():
     assert readme_facts.main(["check"]) == 0
+
+
+def test_protocol_runs_are_counted_apart_from_exploratory_runs(tmp_path):
+    write_jsonl(tmp_path / "runs" / "index.jsonl", [
+        run("bare", True),
+        run("bare", False, protocol_version=1, task_version=2),
+        run("bare", True, protocol_version=1, task_version=2),
+    ])
+    models = readme_facts.facts(tmp_path)["models"]
+    assert models["model-a, exploratory"]["bare"] == (1, 1)
+    assert models["model-a, protocol 1"]["bare"] == (1, 2)
+    text = readme_facts.block(readme_facts.facts(tmp_path))
+    assert "Clean runs passed, model-a, protocol 1 | bare 1 of 2" in text

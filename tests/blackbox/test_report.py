@@ -26,8 +26,8 @@ def test_index_and_report(tmp_path):
     assert rows[1]["behaviours"] == ["minimal-diff", "premature-stop"]
     assert main(["report", "--root", str(root)]) == 0
     md = (root / "docs" / "results.md").read_text()
-    assert "| t1 | m | bare | 2 of 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (2), premature-stop (1) |" in md
-    assert "| t1 | m | plumbed | 1 of 1 | 1/1 (100%) | 1.00 | n/a |" in md
+    assert "| t1 | v1 | m | bare | 2 of 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (2), premature-stop (1) |" in md
+    assert "| t1 | v1 | m | plumbed | 1 of 1 | 1/1 (100%) | 1.00 | n/a |" in md
     assert rows[0]["claim_outcome"] == "unknown" and rows[0]["confounded_by"] == []
     assert "## Confounded runs\n\nNone." in md
 
@@ -35,7 +35,7 @@ def test_index_and_report(tmp_path):
 def test_empty_report(tmp_path):
     assert main(["report", "--root", str(tmp_path)]) == 0
     md = (tmp_path / "docs" / "results.md").read_text()
-    assert "Runs: 0. Clean: 0. Confounded: 0." in md and "| none | | | 0 of 0 |" in md
+    assert "Runs: 0. Clean: 0. Confounded: 0." in md and "| none | | | | 0 of 0 |" in md
 
 
 def fake_model_run(root, run_id, model, passed, claim=None):
@@ -54,10 +54,10 @@ def test_models_are_never_pooled(tmp_path):
     assert main(["index", "--root", str(root)]) == 0
     assert main(["report", "--root", str(root)]) == 0
     md = (root / "docs" / "results.md").read_text()
-    assert "| t1 | model-a | bare | 2 of 2 | 2/2 (100%) |" in md
-    assert "| t1 | model-b | bare | 1 of 1 | 0/1 (0%) |" in md
-    assert "| model-a | bare | 2 | 2/2 (100%) | 0.5000 | 0 | 0 |" in md
-    assert "| model-b | bare | 1 | 0/1 (0%) | 0.5000 | 0 | 0 |" in md
+    assert "| t1 | v1 | model-a | bare | 2 of 2 | 2/2 (100%) |" in md
+    assert "| t1 | v1 | model-b | bare | 1 of 1 | 0/1 (0%) |" in md
+    assert "| model-a | bare | exploratory | 2 | 2/2 (100%) | 0.5000 | 0 | 0 |" in md
+    assert "| model-b | bare | exploratory | 1 | 0/1 (0%) | 0.5000 | 0 | 0 |" in md
     assert "2/3" not in md and "(67%)" not in md
 
 
@@ -72,24 +72,57 @@ def test_by_model_counts_overclaims_and_skips_confounded_runs():
         {"run_id": "c", "task_id": "t", "variant": "bare", "model": "m", "passed": False, "confounded_by": ["INC-1"]},
     ]
     md = report.render(rows, [])
-    assert "| m | bare | 3 | 1/3 (33%) | n/a | 2 | 1 |" in md
-    assert "| t | m | bare | 3 of 4 |" in md
+    assert "| m | bare | exploratory | 3 | 1/3 (33%) | n/a | 2 | 1 |" in md
+    assert "| t | v1 | m | bare | 3 of 4 |" in md
 
 
 def test_a_failure_of_a_rule_alone_is_not_counted_as_a_contradicted_claim():
     from blackbox import report
     rows = [{"run_id": "a", "task_id": "t", "variant": "bare", "model": "m", "passed": False, "claim_outcome": "claimed-failed",
              "behaviours": ["scope-creep"]}]
-    assert "| m | bare | 1 | 0/1 (0%) | n/a | 1 | 0 |" in report.render(rows, [])
+    assert "| m | bare | exploratory | 1 | 0/1 (0%) | n/a | 1 | 0 |" in report.render(rows, [])
 
 
 def test_a_run_with_no_model_is_labelled_unknown_not_dropped():
     from blackbox import report
     md = report.render([{"run_id": "a", "task_id": "t", "variant": "bare", "passed": True}], [])
-    assert "| unknown | bare | 1 | 1/1 (100%) |" in md
-    assert "| t | unknown | bare | 1 of 1 |" in md
+    assert "| unknown | bare | exploratory | 1 | 1/1 (100%) |" in md
+    assert "| t | v1 | unknown | bare | 1 of 1 |" in md
 
 
 def test_empty_by_model_table_says_none():
     from blackbox import report
-    assert "| none | | 0 | | | | |" in report.render([], [])
+    assert "| none | | | 0 | | | | |" in report.render([], [])
+
+
+def test_task_versions_are_never_pooled():
+    from blackbox import report
+    rows = [
+        {"run_id": "a", "task_id": "t", "task_version": 1, "variant": "bare", "model": "m", "passed": False},
+        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True},
+        {"run_id": "c", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True},
+    ]
+    md = report.render(rows, [])
+    assert "| t | v1 | m | bare | 1 of 1 | 0/1 (0%) |" in md
+    assert "| t | v2 | m | bare | 2 of 2 | 2/2 (100%) |" in md
+    assert "1/3" not in md and "2/3" not in md
+
+
+def test_exploratory_and_protocol_runs_get_separate_lines_in_the_by_model_table():
+    from blackbox import report
+    rows = [
+        {"run_id": "a", "task_id": "t", "variant": "bare", "model": "m", "passed": False},
+        {"run_id": "b", "task_id": "t", "task_version": 2, "protocol_version": 1, "variant": "bare", "model": "m", "passed": True},
+    ]
+    md = report.render(rows, [])
+    assert "| m | bare | exploratory | 1 | 0/1 (0%) |" in md
+    assert "| m | bare | protocol 1 | 1 | 1/1 (100%) |" in md
+    assert "support no conclusion" in md
+
+
+def test_the_index_row_carries_the_task_version_and_protocol():
+    from blackbox import report
+    row = report.index_row({"run_id": "x", "task_id": "t", "task_version": 2, "protocol_version": 1, "grade": {"passed": True}})
+    assert row["task_version"] == 2 and row["protocol_version"] == 1
+    old = report.index_row({"run_id": "y", "task_id": "t", "grade": {"passed": False}})
+    assert old["task_version"] == 1 and old["protocol_version"] is None

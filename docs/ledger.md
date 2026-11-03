@@ -69,7 +69,11 @@ It uses ANSI codes only, with no extra dependencies. Lines are cut to the termin
 | `claude_cli_version` | Agent CLI version from the stream's `system/init` event; null if the stream never started. |
 | `session_id` | The UUID the harness passed with `--session-id`. A note is added if the stream reports another. |
 | `task_id`, `variant` | From `task.yaml` and the command line. |
-| `prompt_sha256` | SHA-256 of the exact `PROMPT.md` bytes sent. |
+| `prompt_sha256` | SHA-256 of the compiled prompt sent: `PROMPT.md` followed by the task's "Rules for this task" block. |
+| `task_version` | Version of the task that was run. Version 1 is the unpinned exploratory form; pinned tasks start at 2. |
+| `task_sha256` | SHA-256 of the task's `task.yaml`, `PROMPT.md`, `NOTES.md`, `grader/` and `fixture/`. Compared with `tasks/LOCK.json`. |
+| `harness_commit` | Git commit of the harness checkout, with `+dirty` if tracked files differed from it. `null` outside a git checkout. |
+| `protocol_version` | Evaluation protocol version the run was made under (see [protocol](protocol.md)). `null` for exploratory runs. |
 | `started_at`, `ended_at` | UTC ISO 8601 with milliseconds, around the agent process only. |
 | `duration_ms` | Wall-clock time of the agent process. |
 | `turns` | `num_turns` from the final `result` event; without one, the number of distinct assistant message ids. |

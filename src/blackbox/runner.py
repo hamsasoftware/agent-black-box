@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 import yaml
 
-from blackbox import behaviours, claims, confine, ledger, taxonomy
+from blackbox import behaviours, claims, confine, ledger, taxonomy, taskspec
 from blackbox.envfile import KEY_NAME, agent_env, clean_env, find_env_file, read_env_values
 from blackbox.redact import Redactor
 from blackbox.stream import Stream, parse_line
@@ -77,6 +77,18 @@ def load_task(task_dir: Path) -> dict[str, Any]:
         if not (task_dir / part).exists():
             raise HarnessError(f"task lacks {part}")
     return task
+
+
+def harness_commit(root: Path) -> str | None:
+    """The git commit of the harness checkout, with +dirty when tracked files differ from it. None outside a git checkout."""
+    try:
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=30)
+        if head.returncode != 0:
+            return None
+        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=root, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return head.stdout.strip() + ("+dirty" if status.stdout.strip() else "")
 
 
 def default_plumbing_dir(root: Path) -> Path:
@@ -271,7 +283,7 @@ def run(opts: RunOptions) -> Path:
     if run_dir.exists():
         raise HarnessError(f"{run_dir} already exists")
     session_id = str(uuid.uuid4())
-    prompt = (task_dir / "PROMPT.md").read_text()
+    prompt = taskspec.compile_prompt(task, (task_dir / "PROMPT.md").read_text())
 
     base = Path(tempfile.mkdtemp(prefix="blackbox-")).resolve()
     redactor = Redactor(values.values(), {str(base / "workspace"): "<workspace>", str(base): "<tmp>"})
@@ -363,6 +375,10 @@ def run(opts: RunOptions) -> Path:
             "task_id": task["id"],
             "variant": opts.variant,
             "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+            "task_version": task.get("version", 1),
+            "task_sha256": taskspec.task_sha256(task_dir),
+            "harness_commit": harness_commit(root),
+            "protocol_version": taskspec.PROTOCOL_VERSION if task.get("version", 1) >= 2 else None,
             "started_at": iso(started),
             "ended_at": iso(ended),
             "duration_ms": duration_ms,
