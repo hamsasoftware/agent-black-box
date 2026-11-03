@@ -49,6 +49,7 @@ lint: ## Validate YAML, JSON and issue forms; run ruff when installed
 	$(PY) scripts/validate_files.py
 	$(PY) scripts/incidents.py check
 	$(PY) scripts/update_readme_facts.py check
+	$(PY) scripts/task_lock.py check
 	@if command -v ruff >/dev/null 2>&1 && [ -d src ]; then ruff check src tests; fi
 
 facts: ## Refresh the numbers in README.md from the data

@@ -442,6 +442,30 @@
         },
         "confinement": {
           "$ref": "#/$defs/confinement"
+        },
+        "task_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the task that was run. Version 1 is the unpinned exploratory form."
+        },
+        "task_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the task's task.yaml, PROMPT.md, NOTES.md, grader and fixture."
+        },
+        "harness_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Git commit of the harness checkout, with +dirty if tracked files differed. Null outside a git checkout."
+        },
+        "protocol_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Evaluation protocol version the run was made under. Null for exploratory runs."
         }
       }
     },

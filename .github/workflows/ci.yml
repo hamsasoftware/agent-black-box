@@ -91,6 +91,7 @@ jobs:
       - run: python scripts/validate_files.py
       - run: python scripts/incidents.py check
       - run: python scripts/update_readme_facts.py check
+      - run: python scripts/task_lock.py check
 
   links:
     name: Markdown link check

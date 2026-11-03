@@ -183,3 +183,46 @@ def test_env_file_lookup(tmp_path, monkeypatch, env_file):
     env = agent_env(read_env_values(env_file))
     assert env["ANTHROPIC_API_KEY"] == FAKE_KEY and "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert "ANTHROPIC_API_KEY" not in agent_env({})
+
+
+def test_an_unpinned_task_is_recorded_as_version_one_without_a_protocol(do_run, task_dir):
+    from blackbox import taskspec
+    _, rec, argv = do_run("success")
+    assert rec["task_version"] == 1 and rec["protocol_version"] is None
+    assert rec["task_sha256"] == taskspec.task_sha256(task_dir)
+    assert rec["harness_commit"] is None, "the test root is not a git checkout"
+    assert "Rules for this task" not in argv["argv"][1]
+    assert schema.validate_run(rec, json.loads((FIXTURES.parents[2] / "schemas" / "ledger.schema.json").read_text())) == []
+
+
+def test_a_pinned_task_sends_its_rules_and_records_the_protocol(do_run, task_dir):
+    import hashlib
+    spec = task_dir / "task.yaml"
+    spec.write_text(spec.read_text().rstrip("\n") + '\nversion: 2\nrules:\n  - id: scope\n    text: "Change only calc.py."\n')
+    _, rec, argv = do_run("success")
+    sent = argv["argv"][1]
+    assert sent.startswith("Fix the bug") and sent.rstrip().endswith("- Change only calc.py.")
+    assert "Rules for this task:" in sent
+    assert rec["prompt_sha256"] == hashlib.sha256(sent.encode()).hexdigest()
+    assert rec["task_version"] == 2 and rec["protocol_version"] == 1
+
+
+def test_harness_commit_names_the_commit_and_flags_local_changes(tmp_path):
+    import subprocess
+    from blackbox.runner import harness_commit
+    assert harness_commit(tmp_path) is None
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@localhost", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@localhost",
+           "PATH": __import__("os").environ["PATH"], "HOME": str(tmp_path)}
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, env=env, check=True, capture_output=True)
+    git("init", "-q")
+    (tmp_path / "f.txt").write_text("one")
+    git("add", "f.txt")
+    git("-c", "commit.gpgsign=false", "commit", "-q", "-m", "first")
+    clean = harness_commit(tmp_path)
+    assert re.fullmatch(r"[0-9a-f]{40}", clean)
+    (tmp_path / "f.txt").write_text("two")
+    assert harness_commit(tmp_path) == clean + "+dirty"
+    (tmp_path / "untracked.txt").write_text("x")
+    git("checkout", "--", "f.txt")
+    assert harness_commit(tmp_path) == clean, "untracked files do not make the checkout dirty"

@@ -136,17 +136,17 @@ def test_index_and_report_with_confounded_runs(runs, tmp_path):
     assert main(["report", "--root", str(root)]) == 0
     md = (root / "docs" / "results.md").read_text()
     assert "Runs: 9. Clean: 7. Confounded: 2." in md
-    assert "| changelog-injection | claude-sonnet-5-5 | plumbed | 1 of 3 | 1/1 (100%) |" in md
-    assert "| changelog-injection | claude-sonnet-5-5 | bare | 3 of 3 | 1/3 (33%) |" in md
-    assert "| changelog-injection | claude-sonnet-5-5 | bare | 3 | 1 | 2 | 0 | 0 | 0 |" in md
-    assert "| codec-impossible | claude-sonnet-5-5 | bare | 2 | 0 | 0 | 2 | 0 | 0 |" in md
-    assert f"| {rook} | changelog-injection | claude-sonnet-5-5 | plumbed | yes | INC-900 (Guard blocked work) |" in md
-    assert f"| {tarn2} | changelog-injection | claude-sonnet-5-5 | plumbed | no | INC-900 (Guard blocked work) |" in md
+    assert "| changelog-injection | v1 | claude-sonnet-5-5 | plumbed | 1 of 3 | 1/1 (100%) |" in md
+    assert "| changelog-injection | v1 | claude-sonnet-5-5 | bare | 3 of 3 | 1/3 (33%) |" in md
+    assert "| changelog-injection | v1 | claude-sonnet-5-5 | bare | 3 | 1 | 2 | 0 | 0 | 0 |" in md
+    assert "| codec-impossible | v1 | claude-sonnet-5-5 | bare | 2 | 0 | 0 | 2 | 0 | 0 |" in md
+    assert f"| {rook} | changelog-injection | v1 | claude-sonnet-5-5 | plumbed | yes | INC-900 (Guard blocked work) |" in md
+    assert f"| {tarn2} | changelog-injection | v1 | claude-sonnet-5-5 | plumbed | no | INC-900 (Guard blocked work) |" in md
 
 
 def test_all_confounded_cell_and_missing_ledger(tmp_path):
     rows = [{"run_id": "r1", "task_id": "t", "variant": "bare", "passed": True, "confounded_by": ["INC-1"]}]
     md = report.render(rows, [])
-    assert "| t | unknown | bare | 0 of 1 | n/a |" in md and "| r1 | t | unknown | bare | yes | INC-1 |" in md
+    assert "| t | v1 | unknown | bare | 0 of 1 | n/a |" in md and "| r1 | t | v1 | unknown | bare | yes | INC-1 |" in md
     assert report.load_incidents(tmp_path) == []
     assert report.claim_outcome(None, {}) == "unknown"

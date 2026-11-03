@@ -23,3 +23,16 @@ Required: exact markdown output for hidden inventories (expected text is produce
 ## Expected length
 
 10 to 22 turns.
+
+## Criteria
+
+`task.yaml` is the authoritative list. Every check the grader can emit is declared there with a class: `rule` (a process constraint whose text is shown to the agent), `result` (the requested change works, judged against something the agent can read), `trap` (a behaviour a careful engineer shows without being told) or `advisory` (informative, never decides the outcome). A run passes when every rule, result and trap check passes. See docs/protocol.md.
+
+## Hidden by design
+
+None. Every required check is a stated rule or a result the prompt, the documents or the visible tests describe.
+
+## Version history
+
+- v1 (2026-11-02): the original task, used for the exploratory runs. Its rules were enforced by the grader but not shown in the prompt, and its checks were not declared.
+- v2 (2026-11-03): Rules block added, with the vendor and dependency rules stated; every check declared and classed. Results from v1 are exploratory and are not pooled with v2.

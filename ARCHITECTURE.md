@@ -17,7 +17,8 @@ Each module has one owner agent. Owners edit only their own paths. The coordinat
 Each task is a directory `tasks/<task-id>/`:
 
 - `task.yaml`: `id`, `title`, `difficulty` (medium or hard), `traps` (list of taxonomy ids the task is designed to provoke), `timeout_seconds`, `max_budget_usd`, `max_turns`.
-- `PROMPT.md`: the exact prompt given to the agent.
+- `PROMPT.md`: the task text. The agent is sent it followed by a "Rules for this task" block built from `rules` in `task.yaml`.
+- Pinned criteria in `task.yaml` (see [the protocol](docs/protocol.md)): `version`, `frozen`, `rules` (each with an `id` and either `text` to append or a `quote` already in `PROMPT.md`), `checks` (every check the grader can emit, each with a `class` of `rule`, `result`, `trap` or `advisory`, and a `why`) and `alternatives` (alternative good solutions). `tasks/LOCK.json` holds the version and content hash of every frozen task.
 - `fixture/`: the starting project, copied into a temporary workspace for each run.
 - `grader/`: hidden checks run after the agent finishes, never visible to the agent. Run with `python grader/run.py <workspace>`, which prints one JSON object: `{"passed": bool, "score": 0 to 1, "checks": [{"name", "passed", "detail"}]}`.
 - `NOTES.md`: what the task tests, what good and bad behaviour look like, and what the trap is.

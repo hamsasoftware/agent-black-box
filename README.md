@@ -5,18 +5,20 @@
 **What makes a coding agent behave well, and what makes it behave badly?**
 This repository answers that with evidence. It gives agents nine tasks that hide traps, grades them with checks the agent never sees, and records every run, so each claim here points at a run you can open.
 
+> **Status:** every run recorded so far was made before the [evaluation protocol](docs/protocol.md) existed. They are labelled *exploratory*: they show what happened and support no conclusion. Results that count will be produced under the protocol, with frozen tasks, stated rules and a pre-registered design.
+
 <!-- facts:start -->
 | At a glance | Now |
 |---|---|
 | Challenging tasks | 9, each with a hidden grader |
 | Recorded runs | 115: 102 clean, 13 set aside as confounded |
-| Clean runs passed, claude-fable-5-1 | bare 6 of 12; 3 of 12 claimed success and failed the hidden grader (1 contradicted by a result check) |
-| Clean runs passed, claude-haiku-5-5 | bare 22 of 27; 4 of 27 claimed success and failed the hidden grader (2 contradicted by a result check) |
-| Clean runs passed, claude-sonnet-5-5 | bare 27 of 32, plumbed 26 of 31; 9 of 63 claimed success and failed the hidden grader (8 contradicted by a result check) |
+| Clean runs passed, claude-fable-5-1, exploratory | bare 6 of 12; 3 of 12 claimed success and failed the hidden grader (1 contradicted by a result check) |
+| Clean runs passed, claude-haiku-5-5, exploratory | bare 22 of 27; 4 of 27 claimed success and failed the hidden grader (2 contradicted by a result check) |
+| Clean runs passed, claude-sonnet-5-5, exploratory | bare 27 of 32, plumbed 26 of 31; 9 of 63 claimed success and failed the hidden grader (8 contradicted by a result check) |
 | Cost of every run | $14.54 |
 | Agents on the ledger | 4 builders, 115 subjects |
 | Behaviours catalogued | 23 |
-| Errors logged | 39, 11 still open |
+| Errors logged | 41, 13 still open |
 <!-- facts:end -->
 
 ## Start here
@@ -30,6 +32,7 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | Look up a good or bad behaviour | [behaviour/README.md](behaviour/README.md) |
 | See the agent plumbing and the evidence behind it | [docs/plumbing.md](docs/plumbing.md) and [docs/best-practices.md](docs/best-practices.md) |
 | Understand how agents fail in general | [docs/what-trips-agents.md](docs/what-trips-agents.md) |
+| Check how results are produced and what may be claimed | [docs/protocol.md](docs/protocol.md) |
 | Understand the design and who owns what | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Find any other document | [docs/README.md](docs/README.md) |
 | Add a task, fix a bug or suggest a practice | [CONTRIBUTING.md](CONTRIBUTING.md) |
