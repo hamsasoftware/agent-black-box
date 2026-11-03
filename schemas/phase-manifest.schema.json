@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hamsasoftware/agent-black-box/schemas/phase-manifest.schema.json",
+  "title": "agent-black-box phase manifest",
+  "description": "protocol/phase-N.json, merged before the first run of phase N (docs/protocol.md section 9). scripts/phase_manifest.py check also enforces what a schema cannot: the run list is the full cross-product in the seeded order, tasks match tasks/LOCK.json now, the harness commit is in history, models are exact ids, and the design is not wider than section 4 allows.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "phase", "questions", "models", "variants", "plumbed_model", "tasks", "repeats", "harness_commit", "seed", "shuffle", "budget_usd", "runs"],
+  "properties": {
+    "protocol_version": {"type": "integer", "minimum": 1},
+    "phase": {"type": "integer", "minimum": 1},
+    "questions": {"type": "array", "items": {"type": "string", "enum": ["Q1", "Q2", "Q3", "Q4"]}},
+    "models": {"type": "array", "items": {"type": "string", "pattern": "^claude-[a-z0-9]+(-[a-z0-9]+)*$"}},
+    "variants": {"type": "array", "items": {"type": "string", "enum": ["bare", "plumbed"]}},
+    "plumbed_model": {"type": ["string", "null"]},
+    "tasks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "sha256"],
+        "properties": {
+          "version": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "repeats": {"type": "integer", "minimum": 1, "maximum": 10},
+    "harness_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "seed": {"type": "integer"},
+    "shuffle": {"type": "string", "enum": ["sha256-key:v1"]},
+    "budget_usd": {"type": "number", "minimum": 0},
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task", "model", "variant", "repeat"],
+        "properties": {
+          "task": {"type": "string"},
+          "model": {"type": "string"},
+          "variant": {"type": "string", "enum": ["bare", "plumbed"]},
+          "repeat": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

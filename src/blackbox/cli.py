@@ -6,7 +6,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from blackbox import audit, reanalyse, report, schema, transcript
+from blackbox import audit, phase, reanalyse, report, schema, transcript
 from blackbox.live import LiveView, resolve_run, watch
 from blackbox.envfile import find_env_file, read_env_values
 from blackbox.redact import Redactor, scan
@@ -145,6 +145,35 @@ def cmd_audit(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_phase(a: argparse.Namespace) -> int:
+    """Read-only: the next unfinished run of a manifest and the spend against its budget. Starts nothing, spends nothing."""
+    root = Path(a.root)
+    path = phase.manifest_path(root, a.phase)
+    try:
+        m = phase.read_manifest(path)
+    except (OSError, ValueError) as exc:
+        print(f"blackbox phase: cannot read {path}: {exc}", file=sys.stderr)
+        return 2
+    problems = phase.structure_problems(m, root)
+    if problems:
+        for line in problems:
+            print(f"blackbox phase: {path.name}: {line}", file=sys.stderr)
+        return 2
+    p = phase.progress(m, phase.index_rows(root), a.since)
+    print(f"phase {m['phase']}: {p['done']} of {p['total']} runs done; spent ${p['spent']:.4f} of ${p['budget']:.2f}")
+    if p["next"] is None:
+        print("phase complete: every run in the manifest has a clean run recorded")
+        return 0
+    if p["budget_reached"]:
+        print(f"blackbox phase: the budget of ${p['budget']:.2f} is reached (spent ${p['spent']:.4f}); stop the phase. "
+              f"{p['total'] - p['done']} runs are unfinished and are reported as incomplete, never topped up.", file=sys.stderr)
+        return 3
+    n = p["next"]
+    print(f"next: run {n['position']} of {p['total']}: task {n['task']}  model {n['model']}  variant {n['variant']}  repeat {n['repeat']}")
+    print(f"command (not run): python -m blackbox run --task {n['task']} --variant {n['variant']} --model {n['model']}")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="blackbox", description="Run, record, redact and report agent runs.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -234,6 +263,14 @@ def parser() -> argparse.ArgumentParser:
     ap = asub.add_parser("status", help="table of every tag with its audit state and counts")
     ap.add_argument("--root", default=".")
     sp.set_defaults(fn=cmd_audit)
+
+    sp = sub.add_parser("phase", help="phase manifests (docs/protocol.md section 9); read-only, never starts a run")
+    psub = sp.add_subparsers(dest="phase_cmd", required=True)
+    pp = psub.add_parser("next", help="print the next unfinished run and the spend against the budget; exit 3 once the budget is reached")
+    pp.add_argument("--phase", type=int, required=True)
+    pp.add_argument("--since", default=None, help="count only runs started at or after this timestamp (ISO 8601), to keep an earlier phase's runs out")
+    pp.add_argument("--root", default=".")
+    sp.set_defaults(fn=cmd_phase)
     return p
 
 
