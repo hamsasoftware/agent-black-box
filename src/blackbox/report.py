@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from blackbox import audit
 from blackbox.claims import not_met_statements, success_claims, summary_from_diff
 from blackbox.redact import Redactor
 from blackbox.stream import Stream
@@ -128,7 +129,19 @@ def _model(row: dict[str, Any]) -> str:
     return str(row.get("model") or "unknown")
 
 
-def _by_model(rows: list[dict[str, Any]]) -> list[str]:
+def _passed(states: dict[str, str] | None, tag: str) -> bool:
+    return (states or {}).get(tag) == "passed"
+
+
+def _behaviour_cell(counts: Counter, states: dict[str, str] | None) -> str:
+    """Counts for tags whose audit passed; every other tag only as unaudited, with no count."""
+    audited = sorted(((b, n) for b, n in counts.items() if _passed(states, b)), key=lambda kv: (-kv[1], kv[0]))
+    others = sorted(b for b in counts if not _passed(states, b))
+    parts = [f"{b} ({n})" for b, n in audited] + [f"{b} (unaudited)" for b in others]
+    return ", ".join(parts) or "none"
+
+
+def _by_model(rows: list[dict[str, Any]], states: dict[str, str] | None = None) -> list[str]:
     """One line per model and variant, so models are never pooled in a headline number."""
     cells: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -140,7 +153,8 @@ def _by_model(rows: list[dict[str, Any]]) -> list[str]:
         "Clean runs only, one line per model, variant and basis. Models, task versions and bases are never pooled. "
         "Basis \"exploratory\" means runs made before the evaluation protocol (docs/protocol.md): they show what happened and support no conclusion. "
         "\"Claimed success, failed grader\" counts any failed check, including a rule such as unchanged tests or allowed files; "
-        "the last column counts only runs where a result check contradicted what the agent said.",
+        "the last column counts only runs where a result check contradicted what the agent said, and shows \"unaudited\" until the tag "
+        f"{CONTRADICTED} has passed its audit (docs/protocol.md section 7).",
         "",
         "| Model | Variant | Basis | Clean runs | Pass rate | Mean cost (USD) | Claimed success, failed grader | Of those, claim contradicted by a result check |",
         "|---|---|---|---|---|---|---|---|",
@@ -148,7 +162,9 @@ def _by_model(rows: list[dict[str, Any]]) -> list[str]:
     for (model, variant, basis), clean in sorted(cells.items()):
         passes = sum(1 for r in clean if r.get("passed"))
         overclaims = sum(1 for r in clean if r.get("claim_outcome") == "claimed-failed")
-        contradicted = sum(1 for r in clean if r.get("claim_outcome") == "claimed-failed" and CONTRADICTED in (r.get("behaviours") or []))
+        contradicted: Any = sum(1 for r in clean if r.get("claim_outcome") == "claimed-failed" and CONTRADICTED in (r.get("behaviours") or []))
+        if not _passed(states, CONTRADICTED):
+            contradicted = "unaudited"
         lines.append(f"| {_cell(model)} | {_cell(variant)} | {basis} | {len(clean)} | {passes}/{len(clean)} ({100 * passes / len(clean):.0f}%) | "
                      f"{_fmt(_mean([r.get('cost_usd') for r in clean]), '{:.4f}')} | {overclaims} | {contradicted} |")
     if not cells:
@@ -157,7 +173,9 @@ def _by_model(rows: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = None) -> str:
+def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = None,
+           states: dict[str, str] | None = None) -> str:
+    """`states` maps a tag to its audit state (passed, failed, unaudited); a tag missing from it is unaudited."""
     titles = {str(i.get("id")): str(i.get("title", "")) for i in incidents or []}
     groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -175,11 +193,11 @@ def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = 
         "`invalidates_results: true` lists it; those runs are listed under \"Confounded runs\" below.",
         "",
     ]
-    lines += _by_model(rows)
+    lines += _by_model(rows, states)
     lines += [
         "## By task",
         "",
-        "| Task | Task version | Model | Variant | Clean runs | Pass rate | Mean score | Mean cost (USD) | Mean input tokens | Mean output tokens | Mean turns | Behaviours (unaudited) |",
+        "| Task | Task version | Model | Variant | Clean runs | Pass rate | Mean score | Mean cost (USD) | Mean input tokens | Mean output tokens | Mean turns | Behaviours |",
         "|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for (task, version, model, variant), group in sorted(groups.items()):
@@ -190,7 +208,7 @@ def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = 
             continue
         passes = sum(1 for r in clean if r.get("passed"))
         counts = Counter(b for r in clean for b in r.get("behaviours") or [])
-        behaviours = ", ".join(f"{b} ({n})" for b, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))) or "none"
+        behaviours = _behaviour_cell(counts, states)
         lines.append(
             f"| {_cell(task)} | v{version} | {_cell(model)} | {_cell(variant)} | {runs} | {passes}/{len(clean)} ({100 * passes / len(clean):.0f}%) | "
             f"{_fmt(_mean([r.get('score') for r in clean]), '{:.2f}')} | "
@@ -200,7 +218,9 @@ def render(rows: list[dict[str, Any]], incidents: list[dict[str, Any]] | None = 
             f"{_fmt(_mean([r.get('turns') for r in clean]), '{:.1f}')} | {behaviours} |")
     if not groups:
         lines.append("| none | | | | 0 of 0 | | | | | | | |")
-    lines += ["", "Input tokens exclude cache reads and cache writes; see each run.json for those.", ""]
+    lines += ["", "Input tokens exclude cache reads and cache writes; see each run.json for those. "
+              "Behaviour tags are counted only when the tag has passed its audit in `ledger/audits.jsonl`; "
+              "any other tag is shown as unaudited, without a count.", ""]
 
     lines += [
         "## Claims versus grader",
@@ -245,5 +265,5 @@ def build_report(root: Path, redactor: Redactor) -> Path:
     rows = [json.loads(line) for line in index.read_text().splitlines() if line.strip()]
     out = root / "docs" / "results.md"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(redactor.text(render(rows, load_incidents(root))))
+    out.write_text(redactor.text(render(rows, load_incidents(root), audit.states(root))))
     return out

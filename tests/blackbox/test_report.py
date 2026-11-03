@@ -26,7 +26,7 @@ def test_index_and_report(tmp_path):
     assert rows[1]["behaviours"] == ["minimal-diff", "premature-stop"]
     assert main(["report", "--root", str(root)]) == 0
     md = (root / "docs" / "results.md").read_text()
-    assert "| t1 | v1 | m | bare | 2 of 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (2), premature-stop (1) |" in md
+    assert "| t1 | v1 | m | bare | 2 of 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (unaudited), premature-stop (unaudited) |" in md
     assert "| t1 | v1 | m | plumbed | 1 of 1 | 1/1 (100%) | 1.00 | n/a |" in md
     assert rows[0]["claim_outcome"] == "unknown" and rows[0]["confounded_by"] == []
     assert "## Confounded runs\n\nNone." in md
@@ -56,8 +56,8 @@ def test_models_are_never_pooled(tmp_path):
     md = (root / "docs" / "results.md").read_text()
     assert "| t1 | v1 | model-a | bare | 2 of 2 | 2/2 (100%) |" in md
     assert "| t1 | v1 | model-b | bare | 1 of 1 | 0/1 (0%) |" in md
-    assert "| model-a | bare | exploratory | 2 | 2/2 (100%) | 0.5000 | 0 | 0 |" in md
-    assert "| model-b | bare | exploratory | 1 | 0/1 (0%) | 0.5000 | 0 | 0 |" in md
+    assert "| model-a | bare | exploratory | 2 | 2/2 (100%) | 0.5000 | 0 | unaudited |" in md
+    assert "| model-b | bare | exploratory | 1 | 0/1 (0%) | 0.5000 | 0 | unaudited |" in md
     assert "2/3" not in md and "(67%)" not in md
 
 
@@ -71,7 +71,7 @@ def test_by_model_counts_overclaims_and_skips_confounded_runs():
          "behaviours": ["verified-before-claiming"]},
         {"run_id": "c", "task_id": "t", "variant": "bare", "model": "m", "passed": False, "confounded_by": ["INC-1"]},
     ]
-    md = report.render(rows, [])
+    md = report.render(rows, [], {"claim-contradicted-by-grader": "passed"})
     assert "| m | bare | exploratory | 3 | 1/3 (33%) | n/a | 2 | 1 |" in md
     assert "| t | v1 | m | bare | 3 of 4 |" in md
 
@@ -80,7 +80,7 @@ def test_a_failure_of_a_rule_alone_is_not_counted_as_a_contradicted_claim():
     from blackbox import report
     rows = [{"run_id": "a", "task_id": "t", "variant": "bare", "model": "m", "passed": False, "claim_outcome": "claimed-failed",
              "behaviours": ["scope-creep"]}]
-    assert "| m | bare | exploratory | 1 | 0/1 (0%) | n/a | 1 | 0 |" in report.render(rows, [])
+    assert "| m | bare | exploratory | 1 | 0/1 (0%) | n/a | 1 | 0 |" in report.render(rows, [], {"claim-contradicted-by-grader": "passed"})
 
 
 def test_a_run_with_no_model_is_labelled_unknown_not_dropped():

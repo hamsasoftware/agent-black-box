@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
-from blackbox import reanalyse, report, schema, transcript
+from blackbox import audit, reanalyse, report, schema, transcript
 from blackbox.live import LiveView, resolve_run, watch
 from blackbox.envfile import find_env_file, read_env_values
 from blackbox.redact import Redactor, scan
@@ -112,6 +113,38 @@ def cmd_validate(a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def cmd_audit(a: argparse.Namespace) -> int:
+    root = Path(a.root)
+    if a.audit_cmd == "status":
+        print("| Tag | Status | Tagged correct/wrong/unclear (needed) | Untagged correct/wrong/unclear (needed) | Note |")
+        print("|---|---|---|---|---|")
+        for tag, s in audit.statuses(root).items():
+            c = s.counts
+            tagged = f"{c['tagged_correct']}/{c['tagged_wrong']}/{c['tagged_unclear']} ({c['tagged_needed']})" if c else "-"
+            untagged = f"{c['untagged_correct']}/{c['untagged_wrong']}/{c['untagged_unclear']} ({c['untagged_needed']})" if c else "-"
+            print(f"| {tag} | {s.state} | {tagged} | {untagged} | {s.reason} |")
+        return 0
+    if a.tag not in audit.known_tags(root):
+        print(f"blackbox audit: unknown tag {a.tag!r}", file=sys.stderr)
+        return 2
+    if a.audit_cmd == "sample":
+        picked = audit.sample(audit.load_index(root), a.tag, a.seed)
+        print(f"tag {a.tag}  seed {a.seed}  detector fingerprint {audit.fingerprint(a.tag, root)}")
+        for group, rows in picked.items():
+            print(f"\n{group} ({len(rows)} of {len(audit.population(audit.load_index(root), a.tag, group))} candidates)")
+            for r in rows:
+                print(f"  {r['run_id']}  task {r.get('task_id')}  model {r.get('model')}  variant {r.get('variant')}")
+        return 0
+    try:
+        line = audit.record(root, tag=a.tag, group=a.group, seed=a.seed, run_id=a.run, verdict=a.verdict,
+                            reviewer=a.reviewer, on=a.date or date.today().isoformat(), note=a.note, audit_id=a.audit_id)
+    except audit.AuditError as exc:
+        print(f"blackbox audit: {exc}", file=sys.stderr)
+        return 2
+    print(f"recorded {line['audit_id']} {line['group']} {line['run_id']} {line['verdict']}")
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="blackbox", description="Run, record, redact and report agent runs.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -180,6 +213,27 @@ def parser() -> argparse.ArgumentParser:
     sp.add_argument("paths", nargs="*")
     sp.add_argument("--root", default=".")
     sp.set_defaults(fn=cmd_validate)
+
+    sp = sub.add_parser("audit", help="tag audits (docs/protocol.md section 7); never calls a model")
+    asub = sp.add_subparsers(dest="audit_cmd", required=True)
+    ap = asub.add_parser("sample", help="print the runs to review for a tag and seed; writes nothing")
+    ap.add_argument("--tag", required=True, help="a taxonomy id, or claim-classifier")
+    ap.add_argument("--seed", type=int, required=True)
+    ap.add_argument("--root", default=".")
+    ap = asub.add_parser("record", help="append one reviewed run to ledger/audits.jsonl")
+    ap.add_argument("--tag", required=True)
+    ap.add_argument("--seed", type=int, required=True)
+    ap.add_argument("--group", choices=audit.GROUPS, required=True)
+    ap.add_argument("--run", required=True, help="run id")
+    ap.add_argument("--verdict", required=True, help="correct, wrong or unclear")
+    ap.add_argument("--reviewer", required=True)
+    ap.add_argument("--note", required=True)
+    ap.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
+    ap.add_argument("--audit-id", default=None, help="default: <tag>-seed<seed>-<fingerprint prefix>")
+    ap.add_argument("--root", default=".")
+    ap = asub.add_parser("status", help="table of every tag with its audit state and counts")
+    ap.add_argument("--root", default=".")
+    sp.set_defaults(fn=cmd_audit)
     return p
 
 

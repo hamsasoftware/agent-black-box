@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+SRC = Path(__file__).resolve().parent.parent / "src"
 FORM_DIR = Path(".github/ISSUE_TEMPLATE")
 TAXONOMY = Path("behaviour/taxonomy.yaml")
 TAXONOMY_FIELD = "taxonomy-id"
@@ -104,6 +105,15 @@ def taxonomy_problems():
     return warnings
 
 
+def audit_problems(root=Path(".")):
+    """Shape, index membership and duplicates of ledger/audits.jsonl (see src/blackbox/audit.py)."""
+    if not (root / "ledger" / "audits.jsonl").is_file():
+        return []
+    sys.path.insert(0, str(SRC))
+    from blackbox import audit
+    return audit.check_ledger(root)
+
+
 def main():
     failures = 0
     checked = 0
@@ -121,7 +131,7 @@ def main():
             for error in check_form(path):
                 failures += 1
                 print(f"{path}: {error}")
-    for problem in taxonomy_problems():
+    for problem in audit_problems() + taxonomy_problems():
         failures += 1
         print(f"problem: {problem}")
     if failures:

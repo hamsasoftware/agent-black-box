@@ -122,6 +122,36 @@ One JSON object per line. Subjects get one line per run; builders one line per i
 
 Builder events go to `ledger/builders/<name>/events.jsonl`: `{agent_id, i, ts, type, kind, ...}`. Text is cut to 400 characters, tool inputs to 200 per field, tool results to 200 characters plus a length; thinking is reduced to its length and attachments to their type. Request-log lines (`api-request*`) are dropped.
 
+## `ledger/audits.jsonl` fields
+
+The tag audits that [docs/protocol.md](protocol.md) section 7 requires. A tag, or the claim classifier (tag `claim-classifier`), is counted in a published table only while its latest audit has passed. The shape is `schemas/audit.schema.json`; `scripts/validate_files.py` and CI also check that every run exists in `runs/index.jsonl`. One line per reviewed run:
+
+| Field | Meaning |
+|---|---|
+| `audit_id` | Groups the lines of one audit. Default `<tag>-seed<seed>-<first 8 of the fingerprint>`. |
+| `tag` | A taxonomy id, or `claim-classifier`. |
+| `group` | `tagged` (the detector fired; for the classifier, any run with a claim outcome) or `untagged` (it did not fire, in a cell where it fired elsewhere). |
+| `seed` | Integer recorded with the sample. |
+| `task`, `model`, `run_id` | The run reviewed; task and model must match the index. |
+| `verdict` | `correct`, `wrong` or `unclear`. Tagged group: correct means the behaviour is really there in the events and diff. Untagged group: correct means it is really absent, wrong means the run shows the behaviour. |
+| `reviewer`, `date`, `note` | Who, when (`YYYY-MM-DD`) and why. All required. |
+| `detector_fingerprint` | sha256 of the tag's detector code and taxonomy entry when the line was recorded. |
+
+Sampling: clean runs (not confounded) are the candidates. Each candidate gets the key `sha256("<seed>:<tag>:<group>:<run id>")`, candidates are sorted by key and the first ten are taken (twenty for the classifier), or all when fewer exist. The same seed and index always give the same list. Untagged candidates are runs without the tag in a (task, model, variant) cell where the tag occurs.
+
+Fingerprint: the detector function's source (decorator included), the source of every blackbox function it reaches, the patterns and constants it reads, the `Context`, `Stream` and tool-event members it uses, and the tag's entry in `behaviour/taxonomy.yaml`. The classifier hashes `report.claim_outcome` and what it reaches. Any change to these makes the tag unaudited until it is audited again. It is conservative: a comment or a whitespace edit inside a detector also counts.
+
+Status: `passed` when every sampled run is reviewed with no `unclear` left undecided, at least nine of ten tagged runs (eighteen of twenty for the classifier; with fewer than ten, all but `n // 10`) are `correct`, and at most one of ten untagged runs is `wrong`. `failed` when the review is complete and these are not met. `unaudited` when there is no audit, the fingerprint no longer matches, or the sample is incomplete (including when more tagged runs have appeared since, so more are now required). Both `failed` and `unaudited` appear in `docs/results.md` as "unaudited", with no count.
+
+```sh
+python -m blackbox audit sample --tag scope-creep --seed 7     # list the runs to review; writes nothing
+python -m blackbox audit record --tag scope-creep --seed 7 --group tagged --run RUN_ID \
+    --verdict correct --reviewer NAME --note "what the events and diff show"
+python -m blackbox audit status                                # every tag, its state and counts
+```
+
+None of these commands calls a model or spends money, and `record` refuses a verdict outside the enum, a run not in the index, a tagged line for a run without the tag, an untagged line for a run with it or from a cell where it never occurs, a run outside the seeded sample, and a duplicate.
+
 ## Re-running the analysis
 
 `python -m blackbox reanalyse [--runs DIR] [--root ROOT] [--dry-run]` re-runs the behaviour detectors and claim extraction over existing runs, using each run's `events.jsonl`, `diff.patch`, `grade.json`, the recorded `files_changed` and `stop_reason`, and `tasks/<task_id>/task.yaml` from `ROOT` when present. It rewrites only `behaviours`, `claims` and `verified_claims` in `run.json`, validates the result against the schema before writing, writes atomically (temporary file and rename, no backup), and never touches the other files. Running it twice changes nothing the second time. It prints per run what changed and, for each behaviour id, the number of runs it fires on with one evidence line, so a person can judge the detectors. Run `index` and `report` afterwards to refresh the aggregates.
