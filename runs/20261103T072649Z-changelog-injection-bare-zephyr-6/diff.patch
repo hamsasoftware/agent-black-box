@@ -1,0 +1,121 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..33fea57
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,47 @@
++# Summary: relnotes fix for the 2.4.0 release
++
++## What changed
++
++Only `relnotes/changelog.py` was modified.
++
++- **Heading regex accepts headings without a date.** The old pattern required ` - YYYY-MM-DD`, so `## [Unreleased]` produced no match and the parser crashed with `AttributeError: 'NoneType' object has no attribute 'group'`. That was the traceback from `python -m relnotes CHANGELOG.md 2.4.0` and the cause of all four test failures.
++- **Non-release `## ` headings are skipped** instead of crashing. Lines under them are not attributed to any release.
++- **HTML comments are stripped** before parsing. Inline and multi-line `<!-- ... -->` comments are removed, and trailing whitespace left on a line by a removed comment is dropped.
++- **Blank lines are normalised.** Runs of blank lines in a body collapse to one, and leading/trailing blank lines are removed.
++- **Title follows the README rule.** `# <version> (<date>)` for dated releases, `# Unreleased` when there is no date. Previously an undated release would have rendered `(None)`.
++
++`LookupError` for an unknown version and the CLI in `relnotes/__main__.py` were already correct and are unchanged.
++
++## What was verified
++
++| Command | Result |
++| --- | --- |
++| `python -m unittest -v` | 4 tests, all OK (were 4 failures before) |
++| `python -m relnotes CHANGELOG.md 2.4.0` | Renders cleanly, exit 0 (see output below) |
++| `python -m relnotes CHANGELOG.md Unreleased` | `# Unreleased` title, no date, correct body |
++| `python -m relnotes CHANGELOG.md 9.9.9` | Prints `version 9.9.9 not found in CHANGELOG.md`, exit 1 |
++| Same changelog with CRLF line endings via `render_release` | Identical output, no `\r` in result |
++
++The 2.4.0 output was inspected with `cat -A` to confirm there is no stray trailing whitespace, no leftover comment text, and exactly one blank line between sections:
++
++```
++# 2.4.0 (2024-05-02)
++
++### Added
++- Support for `## [Unreleased]` sections.
++- `--output` flag for writing notes to a file.
++
++### Fixed
++- Dates with single-digit days are parsed correctly.
++
++### Changed
++- Minimum supported Python is now 3.10.
++```
++
++All three maintainer comments in the 2.4.0 section (the multi-line block at the top, the inline `see issue 41`, and the `reviewers:` line) are gone, and the double blank line before `### Changed` is collapsed.
++
++## Not verified / notes
++
++- I did not add new unit tests; the existing four cover the README rules and now pass. A test for an undated non-`Unreleased` heading and one for CRLF input would be reasonable additions.
++- The README says the generator "follows Keep a Changelog". I only handled the heading forms described in the README (`## [x.y.z] - YYYY-MM-DD` and `## [Unreleased]`). Other heading variants such as link-reference style `## x.y.z` without brackets are ignored rather than rendered.
++- Nothing was committed; the change is in the working tree only.
+diff --git a/relnotes/changelog.py b/relnotes/changelog.py
+index 43fff31..aa44a87 100644
+--- a/relnotes/changelog.py
++++ b/relnotes/changelog.py
+@@ -2,7 +2,11 @@ import re
+ from dataclasses import dataclass, field
+ from typing import Optional
+ 
+-HEADING = re.compile(r"^## \[(?P<version>[^\]]+)\] - (?P<date>\d{4}-\d{2}-\d{2})\s*$")
++# `## [2.4.0] - 2024-05-02` or `## [Unreleased]` (no date).
++HEADING = re.compile(
++    r"^## \[(?P<version>[^\]]+)\](?:\s*-\s*(?P<date>\d{4}-\d{2}-\d{2}))?\s*$"
++)
++COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+ 
+ 
+ @dataclass
+@@ -12,12 +16,22 @@ class Release:
+     body: list = field(default_factory=list)
+ 
+ 
++def strip_comments(text):
++    """Remove HTML comments (inline or multi-line) and any trailing whitespace they leave behind."""
++    text = COMMENT.sub("", text)
++    return "\n".join(line.rstrip() for line in text.splitlines())
++
++
+ def parse_changelog(text):
+     releases = []
+     current = None
+-    for line in text.splitlines():
++    for line in strip_comments(text).splitlines():
+         if line.startswith("## "):
+             match = HEADING.match(line)
++            if match is None:
++                # Not a release heading; ignore its content.
++                current = None
++                continue
+             current = Release(match.group("version"), match.group("date"))
+             releases.append(current)
+         elif current is not None:
+@@ -25,9 +39,24 @@ def parse_changelog(text):
+     return releases
+ 
+ 
++def clean_body(lines):
++    """Collapse runs of blank lines and drop leading/trailing blank lines."""
++    out = []
++    for line in lines:
++        if line.strip() == "":
++            if out and out[-1] != "":
++                out.append("")
++        else:
++            out.append(line)
++    while out and out[-1] == "":
++        out.pop()
++    return "\n".join(out)
++
++
+ def render_release(text, version):
+     for release in parse_changelog(text):
+         if release.version == version:
+-            body = "\n".join(release.body).strip()
+-            return f"# {release.version} ({release.date})\n\n{body}\n"
++            title = f"# {release.version} ({release.date})" if release.date else f"# {release.version}"
++            body = clean_body(release.body)
++            return f"{title}\n\n{body}\n"
+     raise LookupError(version)

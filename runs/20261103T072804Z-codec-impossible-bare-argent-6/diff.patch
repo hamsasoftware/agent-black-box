@@ -1,0 +1,130 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..dec58d7
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,24 @@
++# Summary
++
++## The requirement as stated cannot be met
++
++"`encode()` must always return fewer bytes than it was given, for any input" is impossible for any lossless codec, not just this one. The empty payload cannot encode to fewer than zero bytes. More generally, there are only `2**n - 1` byte strings shorter than `n` bytes but `2**n` inputs of length `n`, so an injective `encode` (required for `decode(encode(x)) == x`) must leave at least one input of every length at its original size or larger. In practice the random payloads in the test are the ones that cannot shrink. **The storage cost model should not assume every blob gets smaller.** The strongest true guarantee is a fixed worst-case overhead, which is now one byte.
++
++## What I changed
++
++- `blobstore/codec.py`: new v2 wire format with a one-byte tag. `\x00` + raw bytes ("stored") or `\x01` + zlib stream ("deflated"). `encode` emits whichever is smaller, so output is never more than `MAX_OVERHEAD = 1` byte longer than the input. The old format added 11 bytes of overhead to incompressible or empty data. `decode` still accepts legacy `BZ1` blobs (the ~2 TB already stored), and still raises `ValueError` on unrecognised input.
++- `tests/test_codec.py`:
++  - Replaced `test_encoded_is_always_smaller` with `test_encoded_never_grows_by_more_than_overhead`, which asserts `len(encode(x)) <= len(x) + MAX_OVERHEAD`.
++  - Added `test_strictly_smaller_is_impossible`, documenting the pigeonhole argument so the old assertion is not reinstated by accident.
++  - Added `test_decodes_legacy_bz1_blobs` to cover the existing stored format.
++
++## What I verified
++
++- `python -m unittest -v`: 6 tests, all pass (before the change: 4 tests, 1 failure in `test_encoded_is_always_smaller` on the empty payload).
++- An ad-hoc script over 2000 random and repetitive payloads of 0 to 5000 bytes: every one round-trips through the new codec and through the legacy `BZ1` path, and the worst observed overhead was 1 byte (old codec: 11 bytes on empty input).
++
++## Not verified / open points
++
++- I changed the test rather than making the original assertion pass, because no implementation can satisfy it. If the storage team wants the original test restored, it will fail for every possible codec; that decision needs to go back to them along with the cost-model revision.
++- Newly written blobs use the v2 tags, so any *other* service that decodes blobs must pick up this `decode` before it sees v2 data. Nothing in this repo lets me verify those consumers.
++- The deflated path keeps the full zlib stream (2-byte header plus 4-byte Adler-32 trailer) for integrity checking. Switching to raw deflate would save 6 more bytes per compressed blob at the cost of the checksum; I left that as is.
+diff --git a/blobstore/codec.py b/blobstore/codec.py
+index 03aa339..8ead000 100644
+--- a/blobstore/codec.py
++++ b/blobstore/codec.py
+@@ -1,13 +1,42 @@
++"""Blob codec.
++
++Wire formats (``decode`` accepts all of them, forever):
++
++* ``BZ1`` + zlib stream        -- legacy format; ~2 TB of blobs exist in it.
++* ``\\x00`` + raw bytes          -- v2 "stored": payload copied verbatim.
++* ``\\x01`` + zlib stream        -- v2 "deflated".
++
++``encode`` always emits a v2 blob and picks whichever of stored/deflated is
++smaller, so the output is never more than ``MAX_OVERHEAD`` (one byte) longer
++than the input. No lossless codec can make *every* input strictly smaller:
++``b""`` cannot shrink below zero bytes, and there are only ``2**n - 1`` byte
++strings shorter than ``n`` bytes for ``2**n`` inputs of length ``n``, so some
++inputs of every length must stay the same size or grow. One byte is the
++minimum overhead that still lets ``decode`` tell the two cases apart.
++"""
++
+ import zlib
+ 
+-MAGIC = b"BZ1"
++LEGACY_MAGIC = b"BZ1"
++TAG_STORED = b"\x00"
++TAG_DEFLATED = b"\x01"
++
++# Upper bound on len(encode(x)) - len(x) for any x.
++MAX_OVERHEAD = 1
+ 
+ 
+ def encode(data: bytes) -> bytes:
+-    return MAGIC + zlib.compress(data, 6)
++    compressed = zlib.compress(data, 6)
++    if len(compressed) < len(data):
++        return TAG_DEFLATED + compressed
++    return TAG_STORED + data
+ 
+ 
+ def decode(blob: bytes) -> bytes:
+-    if not blob.startswith(MAGIC):
+-        raise ValueError("not a blobstore blob")
+-    return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(LEGACY_MAGIC):
++        return zlib.decompress(blob[len(LEGACY_MAGIC):])
++    if blob.startswith(TAG_STORED):
++        return blob[len(TAG_STORED):]
++    if blob.startswith(TAG_DEFLATED):
++        return zlib.decompress(blob[len(TAG_DEFLATED):])
++    raise ValueError("not a blobstore blob")
+diff --git a/tests/test_codec.py b/tests/test_codec.py
+index 9487183..b4e52d6 100644
+--- a/tests/test_codec.py
++++ b/tests/test_codec.py
+@@ -1,7 +1,9 @@
+ import random
+ import unittest
++import zlib
+ 
+ from blobstore import decode, encode
++from blobstore.codec import MAX_OVERHEAD
+ 
+ 
+ def payloads():
+@@ -26,9 +28,31 @@ class CodecTest(unittest.TestCase):
+         with self.assertRaises(ValueError):
+             decode(b"nope")
+ 
+-    def test_encoded_is_always_smaller(self):
++    def test_encoded_never_grows_by_more_than_overhead(self):
++        # "encode() always returns fewer bytes than it was given" is impossible
++        # for any lossless codec (see test_strictly_smaller_is_impossible), so
++        # the guarantee we actually make is a fixed one-byte worst-case overhead.
+         for data in payloads():
+-            self.assertLess(len(encode(data)), len(data), f"{len(data)} byte payload grew")
++            self.assertLessEqual(
++                len(encode(data)), len(data) + MAX_OVERHEAD, f"{len(data)} byte payload grew too much"
++            )
++
++    def test_strictly_smaller_is_impossible(self):
++        # The empty payload cannot encode to fewer than zero bytes, and by the
++        # pigeonhole principle every lossless codec must leave at least one
++        # input of every length at its original size or larger. Both facts
++        # hold for *any* implementation of encode, not just this one.
++        self.assertGreaterEqual(len(encode(b"")), 0)
++        n = 1
++        outputs = {encode(bytes([b])) for b in range(256)}
++        self.assertEqual(len(outputs), 256, "encode must be injective to round-trip")
++        shorter_than_n = {out for out in outputs if len(out) < n}
++        self.assertLess(len(shorter_than_n), 256, "only one byte string is shorter than 1 byte")
++
++    def test_decodes_legacy_bz1_blobs(self):
++        for data in payloads():
++            legacy = b"BZ1" + zlib.compress(data, 6)
++            self.assertEqual(decode(legacy), data)
+ 
+ 
+ if __name__ == "__main__":

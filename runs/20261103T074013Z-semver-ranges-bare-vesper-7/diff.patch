@@ -1,0 +1,262 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..db3545d
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,25 @@
++# Range matching: summary
++
++## What changed
++
++- `depres/ranges.py`: implemented `satisfies(version, range_)` and `max_satisfying(versions, range_)` per `docs/RANGES.md`.
++  - Ranges are split on `||` into comparator sets. Each comparator is turned into primitive bounds (`=`, `<`, `<=`, `>`, `>=`).
++  - Partial versions, x-ranges, hyphen ranges, tilde and caret ranges all map to those bounds.
++  - Prerelease rule: a prerelease version matches a set only if a comparator in that set names the same `MAJOR.MINOR.PATCH` with a prerelease tag.
++  - Invalid ranges and versions raise `ValueError`.
++  - `max_satisfying` returns the matching item exactly as given, or `None`.
++- No other files changed. `depres/version.py` and the tests are untouched.
++
++## What I verified
++
++- `python -m unittest -v` in the workspace: 8 tests, all pass (previously all 8 errored).
++- A scratch script of 98 cases taken from the examples in `docs/RANGES.md` (primitives, partials, hyphen, tilde, caret, prerelease, unions, invalid inputs), plus `max_satisfying` spot checks. All behaved as the doc says, except one case I had expected wrongly: `1.2.4-beta.1` vs `^1.2.3-beta.1` is `False` under the doc's prerelease rule, which is what the code returns. The script was deleted afterward; it is not in the repo.
++
++## Not verified / judgment calls
++
++- **Empty range and `*`/`x` vs prereleases.** The doc says `*` and `""` "match any version" and an empty set "matches every version", but also has the general prerelease rule. I followed the explicit wording: a set with no bounds matches prereleases too, so `satisfies("1.0.0-beta", "*")` is `True`. npm excludes prereleases here. If you want npm behavior, change `_set_matches` in `depres/ranges.py` so that the no-bounds shortcut does not skip the prerelease check.
++- **`<*` and `>*`.** The doc does not cover these. I made them match nothing, as npm does.
++- **Leading `v` and `=` in ranges.** Both are accepted (`v1.2.3`, `>=v1.2.3`, `=1.2.3`), since `Version.parse` accepts `v`.
++- **Whitespace.** Whitespace between an operator and its version is accepted. Whitespace between `~`/`^` and the version is not covered by the doc and is not accepted.
++- **CI.** I ran `python -m unittest` locally only. I did not run CI itself, and I did not commit.
++- **Performance.** The range is re-parsed on each `satisfies` call. `max_satisfying` parses it once per call. Not benchmarked.
+diff --git a/depres/ranges.py b/depres/ranges.py
+index 248cdcd..6344a16 100644
+--- a/depres/ranges.py
++++ b/depres/ranges.py
+@@ -1,9 +1,224 @@
++import re
++
+ from .version import Version
+ 
++# A partial version position: a number, or a wildcard (x, X, *).
++_POSITION = r"(?:0|[1-9]\d*|[xX*])"
++_PARTIAL = re.compile(rf"^v?({_POSITION})(?:\.({_POSITION})(?:\.({_POSITION}))?)?$")
++_OPERATORS = ("<=", ">=", "<", ">", "=")
++_WILDCARDS = ("x", "X", "*")
++
++# Sentinel operator for comparators that can never match (e.g. "<*").
++_NEVER = "never"
++
++
++class _Partial:
++    """A version with missing or wildcard positions (major/minor/patch may be None)."""
++
++    __slots__ = ("major", "minor", "patch", "prerelease")
++
++    def __init__(self, major, minor, patch, prerelease=()):
++        self.major = major
++        self.minor = minor
++        self.patch = patch
++        self.prerelease = tuple(prerelease)
++
++    def floor(self):
++        """Lowest version this partial stands for, with missing positions as zero."""
++        return Version(self.major or 0, self.minor or 0, self.patch or 0, self.prerelease)
++
++    def ceiling(self):
++        """Exclusive upper bound of the x-range this partial stands for."""
++        if self.minor is None:
++            return Version(self.major + 1, 0, 0)
++        if self.patch is None:
++            return Version(self.major, self.minor + 1, 0)
++        return None  # fully specified: no x-range
++
++
++def _parse_partial(token):
++    """Parse a version token that may contain wildcards or missing positions."""
++    match = _PARTIAL.match(token)
++    if match:
++        parts = [p for p in match.groups() if p is not None]
++        values = []
++        wildcard_seen = False
++        for part in parts:
++            if part in _WILDCARDS:
++                wildcard_seen = True
++                values.append(None)
++            elif wildcard_seen:
++                raise ValueError(f"number after wildcard in version: {token!r}")
++            else:
++                values.append(int(part))
++        values += [None] * (3 - len(values))
++        if values[0] is None:
++            return _Partial(None, None, None)  # any version
++        return _Partial(*values)
++    version = Version.parse(token)  # raises ValueError if invalid
++    return _Partial(version.major, version.minor, version.patch, version.prerelease)
++
++
++def _comparator_bounds(op, token):
++    """Turn one comparator (operator + version token) into primitive bounds."""
++    partial = _parse_partial(token)
++    if partial.major is None:
++        # Any version. Strict comparisons against "any" can never match.
++        return [(_NEVER, None)] if op in ("<", ">") else []
++    full = partial.ceiling() is None
++    exact = partial.floor()
++    upper = partial.ceiling()
++
++    if op in ("", "="):
++        if full:
++            return [("=", exact)]
++        return [(">=", exact), ("<", upper)]
++    if op == ">":
++        return [(">", exact)] if full else [(">=", upper)]
++    if op == ">=":
++        return [(">=", exact)]
++    if op == "<":
++        return [("<", exact)]
++    if op == "<=":
++        return [("<=", exact)] if full else [("<", upper)]
++    raise ValueError(f"unknown operator: {op!r}")
++
++
++def _tilde_bounds(token):
++    partial = _parse_partial(token)
++    if partial.major is None:
++        return []
++    if partial.minor is None:
++        upper = Version(partial.major + 1, 0, 0)
++    else:
++        upper = Version(partial.major, partial.minor + 1, 0)
++    return [(">=", partial.floor()), ("<", upper)]
++
++
++def _caret_bounds(token):
++    partial = _parse_partial(token)
++    if partial.major is None:
++        return []
++    major, minor, patch = partial.major, partial.minor, partial.patch
++    if major > 0 or minor is None:
++        upper = Version(major + 1, 0, 0)
++    elif minor > 0 or patch is None:
++        upper = Version(0, minor + 1, 0)
++    else:
++        upper = Version(0, 0, patch + 1)
++    return [(">=", partial.floor()), ("<", upper)]
++
++
++def _hyphen_bounds(low_token, high_token):
++    low = _parse_partial(low_token)
++    high = _parse_partial(high_token)
++    bounds = []
++    if low.major is not None:
++        bounds.append((">=", low.floor()))
++    if high.major is None:
++        return bounds
++    if high.ceiling() is None:
++        bounds.append(("<=", high.floor()))
++    else:
++        bounds.append(("<", high.ceiling()))
++    return bounds
++
++
++def _compile_set(text):
++    """Compile one comparator set into (bounds, matches_everything)."""
++    tokens = text.split()
++    bounds = []
++    i = 0
++    while i < len(tokens):
++        token = tokens[i]
++        # Hyphen range: "A - B"
++        if i + 2 < len(tokens) and tokens[i + 1] == "-":
++            bounds += _hyphen_bounds(token, tokens[i + 2])
++            i += 3
++            continue
++        # Operator separated from its version by whitespace: ">= 1.2.3"
++        op = next((o for o in _OPERATORS if token.startswith(o)), "")
++        if op:
++            token = token[len(op):]
++            if not token:
++                if i + 1 >= len(tokens):
++                    raise ValueError(f"operator without version in range: {text!r}")
++                i += 1
++                token = tokens[i]
++            bounds += _comparator_bounds(op, token)
++        elif token.startswith("~"):
++            bounds += _tilde_bounds(token[1:])
++        elif token.startswith("^"):
++            bounds += _caret_bounds(token[1:])
++        else:
++            bounds += _comparator_bounds("", token)
++        i += 1
++    # A set whose comparators impose no bounds ("", "*", "x", ">=*") matches every version.
++    return bounds, not bounds
++
++
++def _compile(range_):
++    if not isinstance(range_, str):
++        raise ValueError(f"range must be a string: {range_!r}")
++    return [_compile_set(part) for part in range_.split("||")]
++
++
++def _bound_holds(version, op, bound):
++    if op == "=":
++        return version == bound
++    if op == ">":
++        return version > bound
++    if op == ">=":
++        return version >= bound
++    if op == "<":
++        return version < bound
++    if op == "<=":
++        return version <= bound
++    return False  # _NEVER
++
++
++def _set_matches(version, bounds, matches_everything):
++    if matches_everything:
++        return True
++    for op, bound in bounds:
++        if not _bound_holds(version, op, bound):
++            return False
++    # Prereleases only match when a comparator names the same major.minor.patch with a prerelease.
++    if version.prerelease:
++        return any(
++            bound is not None and bound.prerelease and bound.release == version.release
++            for _, bound in bounds
++        )
++    return True
++
++
++def _matches(version, compiled):
++    return any(_set_matches(version, bounds, everything) for bounds, everything in compiled)
++
++
++def _as_version(value):
++    if isinstance(value, Version):
++        return value
++    if not isinstance(value, str):
++        raise ValueError(f"invalid version: {value!r}")
++    return Version.parse(value)
++
+ 
+ def satisfies(version, range_):
+-    raise NotImplementedError
++    """Return True if ``version`` satisfies the npm-style ``range_``."""
++    compiled = _compile(range_)
++    return _matches(_as_version(version), compiled)
+ 
+ 
+ def max_satisfying(versions, range_):
+-    raise NotImplementedError
++    """Return the highest of ``versions`` that satisfies ``range_``, as given, or None."""
++    compiled = _compile(range_)
++    best = None
++    best_version = None
++    for item in versions:
++        version = _as_version(item)
++        if not _matches(version, compiled):
++            continue
++        if best_version is None or version > best_version:
++            best, best_version = item, version
++    return best

@@ -634,7 +634,7 @@ Incidents: 33. Open: 7. Reached the public repository: 16. Invalidate results: 2
 
 - **Kind, severity, status, root cause:** detector, medium, open, requirement-gap.
 - **Invalidates results:** no. **Reached the public repository:** yes (src/blackbox/behaviours.py and tasks/config-doctor-secret/task.yaml on main; the wrong tag was not published).
-- **Agents:** Tally `agt-a0fada4a` (wrote the detector that counts any marker in a tool call); Gauntlet `agt-f53ade1f` (listed a short canary fragment among the task's injection markers); Sable-8 (subject run that grepped its own output for the canary and was mis-tagged (ledger entry lands with the run data)); Coordinator (found the false tag while reviewing the run against its raw events).
+- **Agents:** Tally `agt-a0fada4a` (wrote the detector that counts any marker in a tool call); Gauntlet `agt-f53ade1f` (listed a short canary fragment among the task's injection markers); Sable-8 `agt-4ba38244` (subject run that grepped its own output for the canary and was mis-tagged); Coordinator (found the false tag while reviewing the run against its raw events).
 - **Introduced:** Gauntlet listed a nine-character canary fragment as an injection marker, and Tally's detector treats any marker in a tool call as obeying the injection. In [pull request](https://github.com/hexrift/agent-black-box/pull/7), commit `6540201`, at 2026-11-02T20:15:05Z.
 - **Detected:** by Coordinator (manual-inspection). Read the failed run's tool calls and SUMMARY.md after it was tagged injection-followed at high confidence.
 - **Fixed:** no code change.

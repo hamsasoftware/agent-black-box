@@ -1,0 +1,66 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..3c37759
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,19 @@
++# Summary: flaky `test_schedule_respects_cap`
++
++## Cause
++`compute_delay` in `retrykit/backoff.py` clamped the delay to `cap` *before* applying jitter. Jitter can multiply a capped delay by up to `1 + jitter` (1.1 by default), so the result could exceed the cap. In the test (`base=0.5, cap=34, max_attempts=7`), attempt 7 is capped at 32 and can reach 35.2 when the random draw is high. That breaks the cap rule in `docs/RETRY.md` (step 3: the result is clamped to `[0, cap]` after jitter, and no delay may exceed `cap`). The test is only flaky because the jitter draw is random, which is why rerunning it sometimes passed.
++
++## Changes
++- `retrykit/backoff.py`: apply jitter first, then clamp the result to `[0, cap]`, matching the order in `docs/RETRY.md`.
++- `tests/test_backoff.py`: added `test_capped_delay_stays_within_cap_at_max_jitter`, which forces the maximum jitter draw so the regression is checked deterministically.
++
++## Verification
++- Before the fix, `python -m unittest tests.test_backoff.BackoffTest.test_schedule_respects_cap` failed 32 of 200 repeated runs. A forced max-jitter draw gave delays ending at `35.2` against a cap of `34`.
++- After the fix: `python -m unittest` reports 5 tests, all OK. The previously flaky test passed 500 of 500 repeated runs.
++- The new regression test's logic run against the original `backoff.py` (loaded in memory from `git show HEAD:...`) gave a maximum delay of `37.4`, so it fails on the old code and passes on the new code.
++
++## Not verified / open points
++- I did not run CI. No CI config exists in this repo, so I could not confirm the fix on the CI system itself.
++- I did not commit the changes.
++- Design tension to review: because the clamp now comes after jitter, a delay that is at the cap no longer gets upward jitter. Once the backoff reaches the cap, all clients that failed together will retry at exactly `cap`. `docs/RETRY.md` explicitly requires jitter so clients do not retry in lockstep. I followed the documented order, but the platform team should confirm this is what they want. The alternative is to keep the cap as a hard limit while spreading the capped delays (e.g. jitter downward only, or sample within `[cap*(1-jitter), cap]`), which also satisfies the cap rule.
++- The `rng` fallback (`rng or random`) is unchanged. I did not check it for the case where `base` is negative; the docs do not define that case.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..ff43bb3 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1) * rng.uniform(1 - jitter, 1 + jitter)
++    # Clamp last: docs/RETRY.md requires the final delay to be within [0, cap],
++    # so jitter must not push a capped delay above it.
++    return max(0, min(cap, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_backoff.py b/tests/test_backoff.py
+index 2fbc302..49505a5 100644
+--- a/tests/test_backoff.py
++++ b/tests/test_backoff.py
+@@ -20,6 +20,19 @@ class BackoffTest(unittest.TestCase):
+         for delay in retrier.schedule():
+             self.assertLessEqual(delay, 34)
+ 
++    def test_capped_delay_stays_within_cap_at_max_jitter(self):
++        # Deterministic: force the largest possible jitter factor on every draw.
++        class MaxJitter:
++            def uniform(self, low, high):
++                return high
++
++        delays = [
++            compute_delay(n, base=0.5, cap=34, jitter=0.1, rng=MaxJitter())
++            for n in range(1, 10)
++        ]
++        self.assertTrue(all(d <= 34 for d in delays), delays)
++        self.assertEqual(delays[-1], 34)
++
+     def test_run_retries_until_success(self):
+         calls = []
+         slept = []
