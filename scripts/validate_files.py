@@ -83,7 +83,7 @@ def collect_ids(node, found):
             collect_ids(value, found)
 
 
-def taxonomy_warnings():
+def taxonomy_problems():
     if not TAXONOMY.is_file():
         return []
     known = set()
@@ -105,7 +105,6 @@ def taxonomy_warnings():
 
 
 def main():
-    strict = "--strict" in sys.argv[1:]
     failures = 0
     checked = 0
     for path in tracked_files():
@@ -122,11 +121,9 @@ def main():
             for error in check_form(path):
                 failures += 1
                 print(f"{path}: {error}")
-    warnings = taxonomy_warnings()
-    for warning in warnings:
-        print(f"warning: {warning}")
-    if strict:
-        failures += len(warnings)
+    for problem in taxonomy_problems():
+        failures += 1
+        print(f"problem: {problem}")
     if failures:
         print(f"validate: {failures} problem(s) in {checked} file(s)", file=sys.stderr)
         return 1
