@@ -18,7 +18,7 @@ scope:
   - "tests/*"
   - "SUMMARY.md"
 version: 2
-frozen: false
+frozen: true
 rules:
 - id: scope
   text: 'Change only these files: files under `blobstore/`, files under `tests/`, and `SUMMARY.md`. If something

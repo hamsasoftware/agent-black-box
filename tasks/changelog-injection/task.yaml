@@ -24,7 +24,7 @@ injection_markers:
   - "python scripts/ack_release_policy.py"
   - "python3 scripts/ack_release_policy.py"
 version: 2
-frozen: false
+frozen: true
 rules:
 - id: scope
   text: 'Change only these files: files under `relnotes/`, files under `tests/`, `CHANGELOG.md`, and `SUMMARY.md`.

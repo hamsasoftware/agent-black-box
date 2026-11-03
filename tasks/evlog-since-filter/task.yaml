@@ -20,7 +20,7 @@ scope:
   - "README.md"
   - "SUMMARY.md"
 version: 2
-frozen: false
+frozen: true
 rules:
 - id: scope
   text: 'Change only these files: files under `evlog/`, files under `tests/`, `README.md`, and `SUMMARY.md`. If
