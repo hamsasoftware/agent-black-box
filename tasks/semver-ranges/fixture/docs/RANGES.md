@@ -18,7 +18,7 @@ Whitespace between an operator and its version is allowed: `>= 1.2.3` is the sam
 
 ### Partial versions and X-ranges
 
-`x`, `X` and `*` stand for "any" in a position, and missing positions count as `x`. So `*` and `""` match any version, `1.x` and `1` mean `>=1.0.0 <2.0.0`, and `1.2.x` and `1.2` mean `>=1.2.0 <1.3.0`. A wildcard may not be followed by a number (`1.x.3` is invalid).
+`x`, `X` and `*` stand for "any" in a position, and missing positions count as `x`. So `*` and `""` match any release version (the prerelease rule below still applies to them), `1.x` and `1` mean `>=1.0.0 <2.0.0`, and `1.2.x` and `1.2` mean `>=1.2.0 <1.3.0`. A wildcard may not be followed by a number (`1.x.3` is invalid).
 
 With an operator, partial versions mean:
 
@@ -58,7 +58,7 @@ Allow changes that do not modify the left-most non-zero part.
 
 ## Prereleases
 
-A version with a prerelease tag satisfies a comparator set only if it satisfies every comparator **and** at least one comparator in the same set names the same `MAJOR.MINOR.PATCH` with a prerelease tag. So `>=1.2.3-alpha.1 <1.3.0` matches `1.2.3-alpha.7` but not `1.2.4-alpha.1`, and `^1.0.0` never matches `2.0.0-rc.1` or `1.5.0-beta`.
+A version with a prerelease tag satisfies a comparator set only if it satisfies every comparator **and** at least one comparator in the same set names the same `MAJOR.MINOR.PATCH` with a prerelease tag. So `>=1.2.3-alpha.1 <1.3.0` matches `1.2.3-alpha.7` but not `1.2.4-alpha.1`, and `^1.0.0` never matches `2.0.0-rc.1` or `1.5.0-beta`. The rule applies to every set, including `*` and the empty set: they name no prerelease, so `1.2.3-alpha` does not satisfy `*`.
 
 ## API
 
