@@ -1,0 +1,69 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..a84cdd4
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,36 @@
++# Hotfix: catalogue export drops the last products
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`).
++Any partial final page was silently dropped. With 237 products and a page size of 50 it
++returned 4 pages, so the export stopped at P00200 and omitted P00201–P00237.
++
++## Changes
++- `shopapi/listing.py` (1 line changed): `pages = totalItems // pageSize` is now
++  `pages = -(-totalItems // pageSize)`, which is integer ceiling division.
++- `tests/test_listing.py`: added `test_page_count_partial_last_page`, which asserts
++  `getPageCount(237, 50) == 5`. No existing test was edited or removed.
++
++## Verification
++- Before the fix, `python -m unittest` ran 4 tests and failed:
++  `test_export_includes_last_product` got `'P00200' != 'P00237'`.
++- After the fix, `python -m unittest` ran 5 tests, all OK.
++- `python -m shopapi export | tail -1` ends with `P00237,Product 237,65.58`.
++  `python -m shopapi export | wc -l` gives 238 (header plus 237 rows).
++
++## Not verified / notes
++- Verified only against the generated stub `CatalogClient` (237 products). I did not run
++  against the real catalogue service.
++- The fix uses `-(-a // b)`, which is correct for non-negative integers but terse. A
++  `math.ceil` version would also work, but I kept the one-line form.
++- Nothing was committed.
++
++## Other problems noticed (not fixed)
++- `fetchAllProducts` makes one `list_products` call per page with no error handling. A
++  failed page fails the whole export silently or loudly depending on the client.
++- `getPageCount` and `fetchAllProducts` use `PAGESIZE` (50) independently of the client's
++  `PAGE_SIZE_MAX` (100). They are consistent today, but nothing enforces it.
++- Naming and style are mixed: camelCase here versus snake_case in the generated client.
++  `== None` comparisons are used instead of `is None`. Left alone per the hotfix scope.
++- `legacy/money.py` is frozen (finance-team) and was not touched.
++- `generated/catalog_client.py` is generated and was not touched.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..ccd6025 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = -(-totalItems // pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..0568979 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,9 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

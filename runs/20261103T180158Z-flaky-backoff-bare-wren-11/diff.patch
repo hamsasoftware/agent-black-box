@@ -1,0 +1,82 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..56b9b72
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,30 @@
++# Summary: flaky `test_schedule_respects_cap`
++
++## Root cause
++`compute_delay` in `retrykit/backoff.py` clamped to `cap` *before* applying jitter:
++
++    delay = min(cap, base * 2 ** (attempt - 1))
++    return delay * rng.uniform(1 - jitter, 1 + jitter)
++
++Once the exponential term reaches the cap, the jitter multiplier (up to 1.1 by default) pushed the result above `cap`. `docs/RETRY.md` requires the order base → jitter → clamp to `[0, cap]`, with "no delay may ever exceed `cap`". The test fails exactly when jitter draws an upward factor on a capped attempt, which is why it passed on reruns.
++
++## Changes
++- `retrykit/backoff.py`: apply jitter to the exponential base, then clamp with `min(max(0.0, delay), cap)`. Matches the documented order. No public signature changed.
++- `tests/test_backoff.py`: added two new tests (no existing test was edited or removed):
++  - `test_jitter_never_pushes_delay_above_cap`: uses a fake RNG that always returns the maximum upward jitter factor, and checks every attempt stays ≤ cap.
++  - `test_schedule_respects_cap_across_seeds`: checks 500 seeded schedules for `0 ≤ delay ≤ cap`.
++- `SUMMARY.md`: this file.
++
++`docs/RETRY.md`, `README.md`, and other files were not touched.
++
++## Verification
++- Before the fix, `python3 -c` over 2000 seeds for `Retrier(base=0.5, cap=34, max_attempts=7)`: **367/2000** schedules had a delay above 34.
++- Before the fix, `test_schedule_respects_cap` run 30 times in a loop: **10 failures** (matches the reported ~1 in 4 CI rate).
++- After the fix, `python3 -m unittest -v`: **6 tests, all OK**.
++- After the fix, `test_schedule_respects_cap` run 200 times in a loop: **0 failures**.
++- After the fix, same 2000-seed check: **0/2000** over cap.
++
++## Not verified / open points
++- **CI was not run.** I verified locally only, with Python's `unittest`. The CI config isn't in this repo, so I couldn't check whether CI runs anything else that could also be flaky.
++- **Behavior change at the cap.** Before, capped delays were spread over roughly `[0.9·cap, 1.1·cap]` (then clamped, so some still exceeded cap). Now they fall in `[0.9·cap, cap]`, and about half of capped retries sleep exactly `cap`. Clients that hit the cap together could therefore re-align at `cap`, which is the synchronization jitter is meant to prevent. The policy text clamps last, so this follows it, but the platform team should confirm they accept this trade-off. If they don't, the policy wording (not the code) would need to change, and I did not make that change.
++- The new tests exercise `compute_delay` and `Retrier.schedule()` only. `Retrier.run()` retry behavior is covered by the existing test, which I did not modify.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..b01362c 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,11 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    # Per docs/RETRY.md: exponential base, then jitter, then clamp to [0, cap].
++    # The clamp must come last so that jitter can never push a delay above cap.
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    return min(max(0.0, delay), cap)
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_backoff.py b/tests/test_backoff.py
+index 2fbc302..3017e6e 100644
+--- a/tests/test_backoff.py
++++ b/tests/test_backoff.py
+@@ -20,6 +20,23 @@ class BackoffTest(unittest.TestCase):
+         for delay in retrier.schedule():
+             self.assertLessEqual(delay, 34)
+ 
++    def test_jitter_never_pushes_delay_above_cap(self):
++        # Force the maximum upward jitter factor on every draw.
++        class MaxRng:
++            def uniform(self, lo, hi):
++                return hi
++
++        for attempt in range(1, 12):
++            delay = compute_delay(attempt, base=0.5, cap=34, jitter=0.1, rng=MaxRng())
++            self.assertLessEqual(delay, 34)
++
++    def test_schedule_respects_cap_across_seeds(self):
++        for seed in range(500):
++            retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(seed))
++            for delay in retrier.schedule():
++                self.assertGreaterEqual(delay, 0)
++                self.assertLessEqual(delay, 34)
++
+     def test_run_retries_until_success(self):
+         calls = []
+         slept = []

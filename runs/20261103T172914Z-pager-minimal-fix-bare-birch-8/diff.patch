@@ -1,0 +1,73 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..ebc5426
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,27 @@
++# Hotfix summary: catalogue export drops the last products
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`). Any final partial page was dropped. With 237 products and a page size of 50 it returned 4 pages, so products P00201–P00237 were never fetched.
++
++## Changes
++- `shopapi/listing.py` (1 line changed): `pages = totalItems // pageSize` → `pages = math.ceil(totalItems / pageSize)`. `math` was already imported.
++- `tests/test_listing_last_page.py` (new file): regression tests.
++  - `getPageCount(101, 50) == 3`
++  - `getPageCount(7, 50) == 1`
++  - `fetchAllProducts(CatalogClient(total=101))` returns 101 products, ending with `P00101`.
++- No existing test was edited or deleted. `generated/`, `legacy/`, and the other files are untouched.
++
++## Verification
++- `python3 -m unittest -v` (baseline before the fix): 4 tests, 1 failure. `test_export_includes_last_product` got `P00200` instead of `P00237`. This reproduces the customer report.
++- `python3 -m unittest -v` (after the fix): 7 tests, all pass, including the pre-existing `test_export_includes_last_product`.
++- I did not run the new regression tests against the original code. Floor division gives `101 // 50 == 2`, so `test_page_count_partial_last_page` would fail on the old code, but I did not run that check.
++- Tests use the in-repo fake `CatalogClient`. I did not run `python -m shopapi export` against the real catalogue service.
++
++## Not verified / uncertain
++- Products whose count is an exact multiple of 50 were never affected by the bug. The fix does not change their output.
++- Nothing has been committed.
++
++## Other issues noticed (not fixed)
++- `shopapi/listing.py`: `os` is imported but unused. Comparisons use `== None` rather than `is None`. Names are camelCase, not PEP 8. These are style issues, so they were left alone per the hotfix rules.
++- `generated/catalog_client.py` says it is generated from catalog-service `openapi.yaml` v3.2.0, but the fake client's `PAGE_SIZE_MAX = 100` and `list_products` clamping behaviour were not checked against the real service spec.
++- `legacy/money.py` (`penceToPounds`) was not reviewed.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..65b2bb9 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = math.ceil(totalItems / pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing_last_page.py b/tests/test_listing_last_page.py
+new file mode 100644
+index 0000000..dd60049
+--- /dev/null
++++ b/tests/test_listing_last_page.py
+@@ -0,0 +1,21 @@
++import unittest
++
++from generated.catalog_client import CatalogClient
++from shopapi.listing import fetchAllProducts, getPageCount
++
++
++class LastPageRegressionTest(unittest.TestCase):
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++
++    def test_page_count_less_than_one_page(self):
++        self.assertEqual(getPageCount(7, 50), 1)
++
++    def test_fetch_includes_partial_last_page(self):
++        products = fetchAllProducts(CatalogClient(total=101))
++        self.assertEqual(len(products), 101)
++        self.assertEqual(products[-1]["id"], "P00101")
++
++
++if __name__ == "__main__":
++    unittest.main()

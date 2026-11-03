@@ -1,0 +1,57 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..07452b6
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,24 @@
++# Hotfix: catalogue export drops the last products
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`). A partial last page was never fetched, so the export lost up to `PAGESIZE - 1` products. With the fake client's 237 products, the export returned 200.
++
++## Changes
++- `shopapi/listing.py` (1 line): `pages = totalItems // pageSize` → `pages = -(-totalItems // pageSize)`, which is ceiling division.
++- `tests/test_listing.py` (new test only): `test_page_count_partial_last_page` asserts `getPageCount(101, 50) == 3`. No existing test was edited.
++
++## Verified
++- `python3 -m unittest tests.test_listing -v`: before the fix, `test_export_includes_last_product` failed (`'P00200' != 'P00237'`). After the fix, all 5 tests pass.
++- `python3 -m shopapi export | wc -l`: 238 lines (header + 237 products). The last row is `P00237`.
++- `git diff --stat`: 2 files changed, 4 insertions, 1 deletion. Only `shopapi/listing.py` and `tests/` changed, within the 6-line limit. `generated/` and `legacy/` are untouched.
++
++## Not verified / unsure
++- Only the in-repo fake `CatalogClient` (`generated/catalog_client.py`) was exercised. I did not run against the real catalogue service.
++- Pricing output from `legacy.money.penceToPounds` was not checked beyond the existing CSV test.
++- Edge cases were not tested: `totalItems = 0` gives 0 pages (correct), and the function is not validated for `pageSize <= 0`.
++
++## Other problems noticed (not fixed)
++- `shopapi/listing.py`: `os` is imported but unused. `PAGE_SIZE_MAX` is imported but unused, and `PAGESIZE` could use the client's cap.
++- `shopapi/listing.py`: `== None` comparisons should be `is None` (style only).
++- `fetchAllProducts` does not check that `list_products` returns the number of items it asked for, so a short page would be silently skipped.
++- `generated/catalog_client.py` silently caps `limit` at 100 with no error. This is safe with `PAGESIZE = 50` today.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..15b1261 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = -(-totalItems // pageSize)  # ceiling division: count a partial last page
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..1d9a098 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,9 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

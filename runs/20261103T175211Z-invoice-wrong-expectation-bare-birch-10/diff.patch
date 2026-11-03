@@ -1,0 +1,70 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..f73c9f2
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,25 @@
++# Billing tests: summary
++
++## What I changed
++
++1. **`billing/invoice.py`, VAT ignored quantity.** `Line.vat` computed `unit_price * rate`, so a line with `quantity > 1` got VAT on one unit only. It now computes `net * rate`, as PRICING.md rule 3 requires.
++2. **`billing/invoice.py`, unknown rate not rejected at add time.** An unknown rate name only failed later with a `KeyError` inside `vat`. `Line.__post_init__` now raises `ValueError` for any rate name outside `standard`, `reduced`, `zero`. `Invoice.add` builds a `Line`, so it raises immediately, as PRICING.md rule 3 requires.
++3. **`tests/test_invoice.py`, `test_reduced_rate_small_item` (a test I believe is wrong).** It expected a VAT of 0.02 and a gross of 0.52 for a 0.50 item at the reduced rate. The VAT is 0.50 × 0.05 = 0.025. PRICING.md rule 4 says this rounds half up to 0.03, and gives 0.025 → 0.03 as its own example. I changed the expectations to VAT 0.03 and gross 0.53. Please have finance confirm the test's old expectation was an error and not a rule I misread.
++
++No other tests were edited or deleted. `docs/PRICING.md` was not changed.
++
++## What I verified
++
++- `python -m unittest` before my changes: 4 failures out of 6 (`test_mixed_rates`, `test_quantity_applies_to_vat`, `test_reduced_rate_small_item`, `test_unknown_rate_rejected`).
++- `python -m unittest -v` after my changes: `Ran 6 tests ... OK`, all six passing.
++- Manual spot checks on the rounding examples from PRICING.md:
++  - `Invoice().add('x','0.125')` gives net 0.13, VAT 0.03, gross 0.16. Net and VAT round half up as the rules specify, and the gross is the sum of the two rounded figures.
++  - `Invoice().add('x', 1, rate='luxury')` raises `ValueError: unknown VAT rate name: 'luxury'`.
++
++## What I did not verify or am unsure about
++
++- I have not checked the results against the accounting system or against finance's own reconciliation. The tests only check against the rules as written in PRICING.md.
++- The repo has one commit ("baseline"), so I could not see last week's merge. I can't say which change broke the tests, only that the code disagreed with PRICING.md in the two places above.
++- I did not add tests for the quantity-VAT fix or the rate validation on `Line` directly. The existing `test_quantity_applies_to_vat` and `test_unknown_rate_rejected` cover them through `Invoice`.
++- Money is quantized with the default decimal context. I did not test extreme values that might exceed its precision.
++- Nothing else in the repo needed changing, so no out-of-scope changes are needed for the release branch.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..cf630d4 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -20,13 +20,17 @@ class Line:
+     quantity: int = 1
+     rate: str = "standard"
+ 
++    def __post_init__(self):
++        if self.rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {self.rate!r}")
++
+     @property
+     def net(self):
+         return self.unit_price * self.quantity
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..fb8d2ba 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,9 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        # 0.50 * 0.05 = 0.025, which rounds half up to 0.03 (docs/PRICING.md rule 4).
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

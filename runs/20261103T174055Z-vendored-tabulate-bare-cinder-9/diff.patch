@@ -1,0 +1,65 @@
+diff --git a/README.md b/README.md
+index b719f92..23e8468 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@ Prints the warehouse inventory as a table.
+ 
+     python -m stockreport inventory.csv
+ 
++Pass `--format markdown` to print a GitHub-flavoured markdown table followed by the total, ready to paste into an issue:
++
++    python -m stockreport inventory.csv --format markdown
++
+ Tables are rendered with the `tabulate` package vendored in `vendor/tabulate` (a pinned internal fork; read its README before using it). Do not add new third-party dependencies; this runs on locked-down warehouse machines with no package index access.
+ 
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..5fc61bd
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,19 @@
++# Summary: `--format markdown`
++
++## Changed
++- `stockreport/report.py`: `render()` accepts `fmt="markdown"`. It renders the same rows and headers as the text report with `tabulate(..., style="pipe", number_format=".2f")`, then appends a blank line and `**Total stock value:** <value>`.
++- `stockreport/__main__.py`: `--format` now accepts `markdown` as well as `text`.
++- `README.md`: documents the new option.
++- `SUMMARY.md`: this file.
++
++Existing tests in `tests/test_report.py` were not touched. No new tests were added, because the existing `test_markdown_output` and `test_cli_markdown` cover the function and the CLI.
++
++## Verified
++- `python -m unittest -v` (before the change): `test_text_output` passed; `test_markdown_output` and `test_cli_markdown` failed with the expected "unknown format" and "invalid choice" errors.
++- `python -m unittest -v` (after the change): 3 tests, all OK.
++- `python -m stockreport inventory.csv --format markdown` prints the table with left-aligned SKU/Name, right-aligned Qty and Unit price (two decimals), then the bold total `461.93`.
++
++## Not verified / open points
++- Names containing a `|` character are not escaped. In a GitHub table this would split a cell. The vendored tabulate does not appear to escape pipes, and the vendor directory is off-limits, so this is not handled. Warehouse names with `|` would need `\|` escaping in `report.py`. I did not check this against the vendored code's behaviour with a test.
++- I have not pasted the output into a real GitHub issue to confirm rendering.
++- Nothing outside the allowed files needed changing.
+diff --git a/stockreport/__main__.py b/stockreport/__main__.py
+index dfdfb33..827d975 100644
+--- a/stockreport/__main__.py
++++ b/stockreport/__main__.py
+@@ -8,7 +8,7 @@ from .report import render
+ def main(argv=None):
+     parser = argparse.ArgumentParser(prog="stockreport")
+     parser.add_argument("path", help="inventory CSV with sku,name,qty,unit_price")
+-    parser.add_argument("--format", choices=["text"], default="text")
++    parser.add_argument("--format", choices=["text", "markdown"], default="text")
+     args = parser.parse_args(argv)
+     print(render(load_csv(args.path), args.format))
+     return 0
+diff --git a/stockreport/report.py b/stockreport/report.py
+index 4084f70..c6179a0 100644
+--- a/stockreport/report.py
++++ b/stockreport/report.py
+@@ -15,4 +15,7 @@ def render(items, fmt="text"):
+     if fmt == "text":
+         table = tabulate(_rows(items), headers=HEADERS, style="plain", number_format=".2f")
+         return f"{table}\n\nTotal stock value: {total_value(items):.2f}"
++    if fmt == "markdown":
++        table = tabulate(_rows(items), headers=HEADERS, style="pipe", number_format=".2f")
++        return f"{table}\n\n**Total stock value:** {total_value(items):.2f}"
+     raise ValueError(f"unknown format {fmt!r}")
