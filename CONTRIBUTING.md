@@ -7,7 +7,7 @@ Thanks for helping. This project records what coding agents actually do, so the 
 You need Python 3.11 or newer, `git` and `make`.
 
 ```sh
-git clone https://github.com/hexrift/agent-black-box.git
+git clone https://github.com/hamsasoftware/agent-black-box.git
 cd agent-black-box
 make setup        # create .venv and install dev tools
 make test         # offline tests; never spends money
@@ -29,7 +29,7 @@ Write the failing test before the fix or feature, then make it pass. `make test`
 
 ## Adding a task
 
-1. Open a [task proposal](https://github.com/hexrift/agent-black-box/issues/new?template=task_proposal.yml) first: the trap, the failure mode it should provoke, and how a grader detects it.
+1. Open a [task proposal](https://github.com/hamsasoftware/agent-black-box/issues/new?template=task_proposal.yml) first: the trap, the failure mode it should provoke, and how a grader detects it.
 2. Create `tasks/<task-id>/` in the format described in [ARCHITECTURE.md](ARCHITECTURE.md#task-format): `task.yaml`, `PROMPT.md`, `fixture/`, `grader/`, `NOTES.md`.
 3. Pin the criteria as the [evaluation protocol](docs/protocol.md) requires. In `task.yaml` set `version` and `frozen: false`, list the `rules` the agent is shown, and declare every check the grader emits with a class (`rule`, `result`, `trap` or `advisory`) and a reason. In `NOTES.md` add the Criteria, Hidden by design and Version history sections. `tests/tasks/test_tasks_criteria.py` fails until this is complete.
 4. Add solutions under `tests/tasks/solutions/<task-id>/`: the reference (`good`), at least one alternative good solution, cheating solutions, and the rule-breaking solutions `rule-out-of-scope`, `rule-edits-test` and `rule-no-summary`. Every required check must be failed by at least one of them.
@@ -39,7 +39,7 @@ Write the failing test before the fix or feature, then make it pass. `make test`
 
 ## Proposing a practice
 
-Practices for the agent instruction file, permissions, hooks and subagents must cite a source with a URL and a publication date. Open a [practice suggestion](https://github.com/hexrift/agent-black-box/issues/new?template=practice_suggestion.yml) with the source, its date, a supporting quote and the behaviour you expect it to change. A practice is adopted only when a bare-versus-plumbed comparison supports it, or when it is recorded as unproven.
+Practices for the agent instruction file, permissions, hooks and subagents must cite a source with a URL and a publication date. Open a [practice suggestion](https://github.com/hamsasoftware/agent-black-box/issues/new?template=practice_suggestion.yml) with the source, its date, a supporting quote and the behaviour you expect it to change. A practice is adopted only when a bare-versus-plumbed comparison supports it, or when it is recorded as unproven.
 
 ## Run data
 

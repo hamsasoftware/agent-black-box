@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        A good task provokes one specific failure mode and has a grader that detects it without trusting the agent's own summary. See the task format in [ARCHITECTURE.md](https://github.com/hexrift/agent-black-box/blob/main/ARCHITECTURE.md#task-format).
+        A good task provokes one specific failure mode and has a grader that detects it without trusting the agent's own summary. See the task format in [ARCHITECTURE.md](https://github.com/hamsasoftware/agent-black-box/blob/main/ARCHITECTURE.md#task-format).
   - type: input
     id: title
     attributes:

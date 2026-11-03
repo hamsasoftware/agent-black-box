@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. Do not paste API keys, tokens or unredacted run data. If the bug is a secret leak, stop and follow [SECURITY.md](https://github.com/hexrift/agent-black-box/blob/main/SECURITY.md) instead.
+        Thanks for reporting. Do not paste API keys, tokens or unredacted run data. If the bug is a secret leak, stop and follow [SECURITY.md](https://github.com/hamsasoftware/agent-black-box/blob/main/SECURITY.md) instead.
   - type: dropdown
     id: area
     attributes:

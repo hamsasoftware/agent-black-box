@@ -36,7 +36,7 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | Understand the design and who owns what | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Find any other document | [docs/README.md](docs/README.md) |
 | Add a task, fix a bug or suggest a practice | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| Report a behaviour I saw | [Behaviour report](https://github.com/hexrift/agent-black-box/issues/new?template=behaviour_report.yml) |
+| Report a behaviour I saw | [Behaviour report](https://github.com/hamsasoftware/agent-black-box/issues/new?template=behaviour_report.yml) |
 | Report a leaked secret or a vulnerability | [SECURITY.md](SECURITY.md) |
 
 ## What we found so far

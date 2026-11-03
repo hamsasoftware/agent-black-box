@@ -4,7 +4,7 @@
 
 Report security problems privately. Do not open a public issue, pull request or discussion.
 
-Use GitHub private vulnerability reporting: open the [Security tab](https://github.com/hexrift/agent-black-box/security) and choose **Report a vulnerability**. The report is visible only to the maintainers.
+Use GitHub private vulnerability reporting: open the [Security tab](https://github.com/hamsasoftware/agent-black-box/security) and choose **Report a vulnerability**. The report is visible only to the maintainers.
 
 Include what you found, where (file, commit, run id), how to reproduce it, and the impact you expect. If you already know a fix, describe it in the report rather than in a public pull request.
 

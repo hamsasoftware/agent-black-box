@@ -1,38 +1,38 @@
-* @hexrift
+* @hamsa-jama
 
-/README.md @hexrift
-/ARCHITECTURE.md @hexrift
-/runs/ @hexrift
-/ledger/ @hexrift
+/README.md @hamsa-jama
+/ARCHITECTURE.md @hamsa-jama
+/runs/ @hamsa-jama
+/ledger/ @hamsa-jama
 
-/docs/best-practices.md @hexrift
-/docs/sources.json @hexrift
-/docs/model-choice.md @hexrift
+/docs/best-practices.md @hamsa-jama
+/docs/sources.json @hamsa-jama
+/docs/model-choice.md @hamsa-jama
 
-/AGENTS.md @hexrift
-/CLAUDE.md @hexrift
-/.claude/ @hexrift
-/plumbing/ @hexrift
-/.github/ @hexrift
-/SECURITY.md @hexrift
-/CONTRIBUTING.md @hexrift
-/CODE_OF_CONDUCT.md @hexrift
-/CODEOWNERS @hexrift
-/.editorconfig @hexrift
-/Makefile @hexrift
-/docs/adr/ @hexrift
-/docs/README.md @hexrift
-/scripts/ @hexrift
+/AGENTS.md @hamsa-jama
+/CLAUDE.md @hamsa-jama
+/.claude/ @hamsa-jama
+/plumbing/ @hamsa-jama
+/.github/ @hamsa-jama
+/SECURITY.md @hamsa-jama
+/CONTRIBUTING.md @hamsa-jama
+/CODE_OF_CONDUCT.md @hamsa-jama
+/CODEOWNERS @hamsa-jama
+/.editorconfig @hamsa-jama
+/Makefile @hamsa-jama
+/docs/adr/ @hamsa-jama
+/docs/README.md @hamsa-jama
+/scripts/ @hamsa-jama
 
-/src/blackbox/ @hexrift
-/tests/blackbox/ @hexrift
-/pyproject.toml @hexrift
-/schemas/ @hexrift
-/docs/ledger.md @hexrift
+/src/blackbox/ @hamsa-jama
+/tests/blackbox/ @hamsa-jama
+/pyproject.toml @hamsa-jama
+/schemas/ @hamsa-jama
+/docs/ledger.md @hamsa-jama
 
-/tasks/ @hexrift
-/behaviour/taxonomy.yaml @hexrift
-/tests/tasks/ @hexrift
+/tasks/ @hamsa-jama
+/behaviour/taxonomy.yaml @hamsa-jama
+/tests/tasks/ @hamsa-jama
 
-/video/ @hexrift
-/docs/video.md @hexrift
+/video/ @hamsa-jama
+/docs/video.md @hamsa-jama

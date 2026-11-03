@@ -108,7 +108,7 @@ jobs:
             --include-fragments
             --max-retries 3
             --accept 200,206,429
-            --exclude '^https://github\.com/hexrift/agent-black-box/(security|discussions)'
+            --exclude '^https://github\.com/hamsasoftware/agent-black-box/(security|discussions)'
             README.md
             'docs/**/*.md'
           fail: true
