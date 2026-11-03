@@ -11,7 +11,7 @@ git clone https://github.com/hexrift/agent-black-box.git
 cd agent-black-box
 make setup        # create .venv and install dev tools
 make test         # offline tests; never spends money
-make run-task TASK=<task-id> VARIANT=bare   # one real run; spends money
+make run-task TASK=<task-id> VARIANT=bare MODEL=<model-id> [BUDGET=<usd>]   # one real run; spends money
 ```
 
 `make help` lists every command. `make run-task` needs an API key in an environment file that the harness names at runtime (see `docs/ledger.md`). The key is passed only to the agent subprocess and must never be committed.
