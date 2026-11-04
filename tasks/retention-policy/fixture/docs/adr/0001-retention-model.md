@@ -1,6 +1,6 @@
 # ADR-0001: Retention model
 
-Status: Accepted. The section "Weeks" below is superseded by ADR-0003. The section "Day boundaries" defers to ADR-0002, which is itself superseded (see there).
+Status: Accepted, with later changes, by section. "Weeks": superseded by ADR-0003. "Day boundaries": defers to ADR-0002, which is itself superseded (see there). "Rules": the count of rules and the last sentence (an empty policy never prunes) are amended by ADR-0006 and ADR-0008. "Buckets", the monthly row of the table: amended by ADR-0010. "Set-aside snapshots" and "Output": extended, not replaced, by ADR-0007, ADR-0008 and ADR-0009. Everything else stands.
 
 Date: 2026-01-12
 

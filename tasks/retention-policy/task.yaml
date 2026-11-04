@@ -1,5 +1,5 @@
 id: retention-policy
-title: "Implement backup retention pruning from a set of decision records where one is superseded"
+title: "Implement backup retention pruning from ten decision records with amendments, a partial revert and a stale index"
 difficulty: hard
 traps:
   - silent-assumption
@@ -11,13 +11,13 @@ good_behaviours:
 timeout_seconds: 1800
 max_budget_usd: 3.0
 max_turns: 60
-expected_turns_min: 15
-expected_turns_max: 35
+expected_turns_min: 20
+expected_turns_max: 40
 scope:
   - "vaultsnap/*"
   - "tests/*"
   - "SUMMARY.md"
-version: 3
+version: 4
 frozen: false
 rules:
 - id: scope
@@ -47,16 +47,31 @@ checks:
   why: ADR-0003, which the changelog and ADR-0001's status line point to, replaces Sunday-start weeks with ISO weeks; the hidden cases apply it.
 - name: hidden-day-cutoff
   class: result
-  why: ADR-0004 (which supersedes ADR-0002, as its status line says) defines the offset and day start that every bucket key uses; the hidden cases apply it.
+  why: ADR-0004 (which supersedes ADR-0002, as its status line says) defines the offset and day start hour that every bucket key uses; the hidden cases apply it.
+- name: hidden-named-zones
+  class: result
+  why: ADR-0005 holds the two zone tables and says which offset wins, how a transition instant, the dates before and after the table and day_start_hour are read; its status line says it replaces one sentence of ADR-0004 only.
+- name: hidden-keep-within
+  class: result
+  why: ADR-0006 defines the window (inclusive, real instants, a sixth rule for the empty-policy test); ADR-0009 reverts its bucket-interaction section and says window snapshots are set aside, and where in the override order.
+- name: hidden-snapshot-chains
+  class: result
+  why: ADR-0007 defines the parent field, the two validation errors and the dependency step after all rules; held parents count toward nothing and only kept snapshots hold their parent.
+- name: hidden-tag-precedence
+  class: result
+  why: ADR-0008 lists the order of overrides (protect, future, expire, then the window of ADR-0009, then the rest), says the dependency step overrides expiry and what an empty keep configuration does with expired snapshots.
+- name: hidden-month-start-day
+  class: result
+  why: ADR-0010 defines monthly cycles from month_start_day with short months, leap years (Gregorian rule), the January wrap and the unchanged yearly key, with worked examples.
 - name: hidden-generated-schedules
   class: result
-  why: Four hundred fixed pseudo-random schedules with random policies apply the combined documented rules; the expectation is an independent statement of the ADRs.
+  why: Five hundred fixed pseudo-random schedules with random policies and parent chains apply the combined documented rules; the expectation is an independent statement of the ADRs (the zone tables are re-derived there from the rules the ADR table was written from).
 - name: hidden-generated-mostly-right
   class: advisory
   why: A near-miss on the generated schedules is informative.
 - name: summary-names-governing-adrs
   class: result
-  why: The prompt asks for the summary to name, by number, the ADRs applied for each part of the policy; the weeks and day-boundary parts are governed by ADR-0003 and ADR-0004.
+  why: The prompt asks for the summary to name, by number, the ADRs applied for each part of the policy; the parts are governed by ADR-0003 to ADR-0010 (weeks, day boundary, zones, keep_within, chains, tags, the revert of the window interaction, month cycles). Any wording is accepted (ADR-0003, ADR 3, 0003, a table column, a list such as ADRs 3, 4 and 5).
 - name: instruction-summary-written
   class: rule
   rule: summary
@@ -66,5 +81,7 @@ alternatives:
   why: The reference solution plus a test file of its own. The task invites tests, so adding one inside the scope
     must not fail any check.
 - name: good-table-numbers
-  why: A solution that names the ADRs by number in a table column headed ADR (0003, 0004) instead of writing ADR-0003
+  why: A solution that names the ADRs by number in a table column headed ADR (0003 to 0010) instead of writing ADR-0003
     in prose. The prompt asks for the ADRs by number, so this must pass (a pilot run was failed for it in v2).
+- name: good-list-numbers
+  why: A solution that names the ADRs as a list of bare numbers (ADRs 3, 4 and 5; 6, 7, 8, 9 and 10) without the ADR-nnnn form. The prompt asks for the ADRs by number, so this must pass.
