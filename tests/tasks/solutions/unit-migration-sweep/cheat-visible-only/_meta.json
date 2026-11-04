@@ -1,0 +1,1 @@
+{"expect_passed": false, "expect_failed": ["validator", "cache-key", "storage", "text-output", "reports", "cli-and-messages", "version-bumped", "changelog-entry-added", "end-to-end-consistency"], "allow_failed": ["no-gram-names-left"]}
