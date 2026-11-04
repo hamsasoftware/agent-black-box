@@ -16,4 +16,14 @@ Gate G3 of docs/protocol.md. Pilot runs are exploratory: they were made with the
 
 Haiku passed 4 of 5.
 
-- Verdict: approved
+### Sonnet calibration runs, reviewed as pilot evidence
+
+Three Sonnet runs, bare variant, 2026-11-04: `20261104T152809Z-ini-subset-parser-bare-dune-25`, `20261104T154224Z-ini-subset-parser-bare-yarrow-26`, `20261104T154501Z-ini-subset-parser-bare-zephyr-26`. All three failed `hidden-error-cases` (cost $1.09). Review of the failed cases:
+
+- `[a]# c` and `a = "x"# c` expected `ParseError`: **justified**. `docs/FORMAT.md` says a comment needs whitespace before the `#`, so a `#` directly after `]` or after a closing quote is unexpected text.
+- `@include "x` and `@include "x" y` expected `invalid include`, runs reported `unterminated string` and `unexpected text after string`: **unfair**. The v2 text says both "the path is a quoted string as above" (which points to the string errors) and "anything else after `@include` is `invalid include`", so either reading follows the document.
+- `a = "abc\` (a backslash ends the line) expected `unterminated string`, a run reported `invalid escape`: **unfair**. The v2 text does not say which error a trailing backslash gives.
+
+- Verdict: rejected
+
+An unfair verdict means the task changes, its version increases and G3 restarts. Version 3 states both rules in `docs/FORMAT.md` (the grader is unchanged); it needs a new Haiku pilot.

@@ -19,3 +19,7 @@ Haiku passed 4 of 5 behaviour checks and failed one run only on the unfair summa
 - Verdict: rejected
 
 An unfair verdict means the task changes, its version increases and G3 restarts. Version 3 makes the check accept the bare numbers 0003 and 0004 and adds the alternative `good-table-numbers`; v3 needs a new pilot.
+
+### Calibration with Sonnet (not part of G3)
+
+Three Sonnet runs, bare variant, 2026-11-04: `20261104T153153Z-retention-policy-bare-flint-25`, `20261104T154050Z-retention-policy-bare-vesper-26`, `20261104T154144Z-retention-policy-bare-wren-26`. Passed 3 of 3, cost $0.38. These runs used version 3 of the task. Sonnet passed every run; version 3 still needs its own Haiku pilot for G3.

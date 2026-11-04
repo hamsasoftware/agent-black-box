@@ -17,3 +17,7 @@ None. Four runs failed only the advisory `no-gram-names-left` check (a gram-name
 Haiku passed 5 of 5, so this version does not separate models that are at least as capable as Haiku. The version is fair and unchanged; making it harder is a separate decision.
 
 - Verdict: approved
+
+### Calibration with Sonnet (not part of G3)
+
+Three Sonnet runs, bare variant, 2026-11-04: `20261104T153242Z-unit-migration-sweep-bare-ember-26`, `20261104T153643Z-unit-migration-sweep-bare-sable-26`, `20261104T153834Z-unit-migration-sweep-bare-tarn-26`. Passed 3 of 3, cost $0.93. Sonnet passed every run, so this version does not separate the two models.
