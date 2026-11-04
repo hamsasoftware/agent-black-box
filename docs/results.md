@@ -11,7 +11,7 @@ An AI coding agent is given a small programming job in a sandbox. Afterwards a h
 - **What was run:** 352 runs of 9 tasks (named below) by 3 models (claude-fable-5-1, claude-haiku-5-5, claude-sonnet-5-5). 338 are clean and counted; 14 were set aside because a logged mistake of ours could have affected them.
 - **Pass rate:** the hidden checker passed 308 of 338 clean runs overall; the tables below split it by model and by task, because pooling models would hide differences.
 - **How hard the tasks were:** 12 of 20 task versions were passed in every clean run. When nearly everything passes, the runs cannot tell the models apart, so a small gap between models here is not evidence that one is better.
-- **Behaviour tags are leads, not findings:** 14 different tags appear on clean runs and 0 have passed an audit. A tag is counted only after it is audited by a person reading sample runs; the rest read "unaudited" and carry no number.
+- **Behaviour tags are leads, not findings:** 14 different tags appear on clean runs and 1 has passed an audit. A tag is counted only after it is audited by a person reading sample runs; the rest read "unaudited" and carry no number.
 - **Claim figures:** how often an agent said it succeeded when the checker disagreed comes from a classifier whose audit has passed, so the counts are shown.
 
 ### Per model
