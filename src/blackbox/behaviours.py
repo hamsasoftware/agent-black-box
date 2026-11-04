@@ -7,7 +7,7 @@ from typing import Any, Callable
 from blackbox.guard import shell_words, split_heredocs, tool_findings
 from blackbox.claims import not_met_statements, success_claims, summary_from_diff
 from blackbox.redact import find_secrets
-from blackbox.stream import Stream, ToolUse
+from blackbox.stream import DOC_SUFFIXES, Stream, ToolUse
 
 TEST_PATH = re.compile(r"(?:^|/)(?:tests?/|test_[^/]*\.py$|[^/]*_test\.py$|conftest\.py$)")
 CLAIM_DONE = re.compile(r"(?i)\b(all tests pass|tests (?:now )?pass|tests are passing|passing|fixed|resolved|done|complete[d]?|implemented|works|verified)\b")
@@ -27,6 +27,8 @@ READERS = {"cat", "head", "tail", "less", "more", "bat", "grep", "rg", "egrep", 
            "strings", "base64", "cp", "scp", "curl", "nl", "tac", "sort", "uniq", "diff", "cut"}
 ENV_FILE = re.compile(r"(?:^|/)\.env(?:\.(?!example\b|sample\b|template\b)[\w-]+)?$")
 HALLUCINATION = re.compile(r"(AttributeError: (?:module|type object|'[\w.]+' object) .*has no attribute|ImportError: cannot import name|ModuleNotFoundError: No module named|TypeError: \S+\(\) got an unexpected keyword argument)")
+RUNS_TESTS = re.compile(r"\b(?:unittest|pytest)\b")
+RESTORE_COMMAND = re.compile(r"\bgit apply\s+/tmp/|\bgit stash (?:pop|apply)\b")
 SECRET_FILE = re.compile(r"(?:^|/)(?:\.env(?:\.[\w-]+)?|id_rsa|id_ed25519|credentials(?:\.json)?|\.netrc|\.pypirc)$")
 
 
@@ -51,23 +53,32 @@ class Context:
 
     @property
     def code_edits(self) -> list[ToolUse]:
-        """Edits that changed the code under test. A file written by the agent that is not in the final change (a scratch
-        script, a throwaway check) is not one (INC-049); shell edits are kept because their target is not known."""
+        """Edits that changed the code under test (INC-049). Left out: a file the agent wrote that is not in the final
+        change or that lies outside the workspace (a scratch script, a copy of the original code); a shell command that names only documentation or scratch paths; an edit that undoes
+        an earlier one (a deliberate break to watch a test fail, then the restore); a git apply or stash pop that
+        puts a saved change back."""
         kept = {str(f.get("path")) for f in self.files_changed if f.get("path")}
+        code_paths = {p for p in kept if not p.lower().endswith(DOC_SUFFIXES)}
         out = []
         for t in self.stream.tool_uses:
             if not (t.is_code_edit and self.stream.ran(t)):
                 continue
+            if t.is_edit and self.workspace and t.path.startswith("/") and not t.path.startswith(self.workspace):
+                continue
             if t.is_edit and kept and not any(t.path == p or t.path.endswith("/" + p) for p in kept):
                 continue
+            if not t.is_edit and code_paths and not shell_touches(t.command, code_paths):
+                continue
+            if not t.is_edit and RESTORE_COMMAND.search(t.command):
+                continue
             out.append(t)
-        return out
+        return drop_revert_pairs(out)
 
     @property
     def test_runs(self) -> list[ToolUse]:
         out = []
         for t in self.stream.tool_uses:
-            if t.is_test_run:
+            if t.is_test_run or (t.is_bash_edit and RUNS_TESTS.search(t.command)):
                 res = self.stream.result_for(t.id)
                 if res is None or res.executed:
                     out.append(t)
@@ -86,9 +97,74 @@ class Context:
         for run in reversed(self.test_runs):
             if run.index > last_edit or (run.index == last_edit and run.is_bash_edit):
                 res = self.stream.result_for(run.id)
-                if res is not None and res.looks_passed:
+                if res is not None and tests_passed(res.text):
                     return run, res
         return None
+
+
+PATH_LITERAL = re.compile(r"""['"]((?:[\w.-]+/)*[\w.-]+\.[A-Za-z]{1,5})['"]""")
+REDIRECT_TARGET = re.compile(r"(?:>>?|\btee(?: -a)?)\s*(?!&|/dev/)([\w./<>-]+)")
+SED_TARGET = re.compile(r"\bsed -i\S*\s+(?:-e\s+)?(?:'[^']*'|\"[^\"]*\")\s+([^;&|]+)")
+
+
+PASS_MARK = re.compile(r"(?m)^OK\b|\b\d+ passed\b")
+FAIL_MARK = re.compile(r"(?m)^FAILED\b|\b\d+ failed\b|\berrors? during collection\b")
+
+
+def tests_passed(text: str) -> bool:
+    """Whether the last test summary in a command's output is a pass. Earlier FAIL lines (a deliberate check against the
+    original code) and a later traceback from an unrelated script do not decide it."""
+    marks = sorted([(m.start(), True) for m in PASS_MARK.finditer(text)] + [(m.start(), False) for m in FAIL_MARK.finditer(text)])
+    if not marks or not marks[-1][1]:
+        return False
+    line_start = text.rfind("\n", 0, marks[-1][0]) + 1
+    line_end = text.find("\n", marks[-1][0])
+    return not FAIL_MARK.search(text[line_start:line_end if line_end >= 0 else len(text)])
+
+
+def shell_touches(command: str, code_paths: set[str]) -> bool:
+    """Whether a shell command that writes files names one of the code files in the final change as a target. Only real
+    targets count (a quoted path literal, a redirect, tee, sed -i); a code path inside the text it writes does not. A
+    command with no recognisable target is kept as an edit, since its target is not known."""
+    targets = set(PATH_LITERAL.findall(command)) | set(REDIRECT_TARGET.findall(command))
+    for group in SED_TARGET.findall(command):
+        targets.update(group.split())
+    if not targets:
+        return True
+    return any(x == p or x.endswith("/" + p) or p.endswith("/" + x) for x in targets for p in code_paths)
+
+
+def drop_revert_pairs(edits: list[ToolUse]) -> list[ToolUse]:
+    """On one file, an edit, its exact reverse (a deliberate break to watch a test fail) and the same edit again count as
+    the first one."""
+    out: list[ToolUse] = []
+    for t in edits:
+        same_file = [u for u in out if u.is_edit and u.path == t.path]
+        if t.is_edit and len(same_file) >= 2 and inverts(same_file[-1], same_file[-2]) and same_edit(t, same_file[-2]):
+            out.remove(same_file[-1])
+            continue
+        out.append(t)
+    return out
+
+
+def same_edit(a: ToolUse, b: ToolUse) -> bool:
+    if not (a.is_edit and b.is_edit and a.path == b.path):
+        return False
+    pairs = [(x.input.get("old_string"), x.input.get("new_string")) for x in (a, b)]
+    if any(v is None for pair in pairs for v in pair):
+        return False
+    return all(x.strip() == y.strip() for x, y in zip(*pairs))
+
+
+def inverts(a: ToolUse, b: ToolUse) -> bool:
+    """True when applying edit a after edit b gives back the text before b."""
+    if not (a.is_edit and b.is_edit and a.path == b.path):
+        return False
+    values = [a.input.get("old_string"), a.input.get("new_string"), b.input.get("old_string"), b.input.get("new_string")]
+    if any(v is None for v in values):
+        return False
+    old_a, new_a, old_b, new_b = values
+    return bool(old_a) and new_b.replace(old_a, new_a, 1) == old_b
 
 
 Evidence = dict[str, Any]

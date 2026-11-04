@@ -222,7 +222,7 @@ def test_doc_edits_and_unexecuted_edits_do_not_reset_verification():
 
 def test_bash_edits_count_as_code_edits():
     b = (B().tool("t", "Bash", command="pytest -q").res("t", "3 passed")
-         .tool("e", "Bash", command="python - <<'E'\np='a.py'\nopen(p,'w').write('x')\nE").res("e", "")
+         .tool("e", "Bash", command="python - <<'E'\np='calc.py'\nopen(p,'w').write('x')\nE").res("e", "")
          .say("Done, all tests pass."))
     assert "claim-without-verification" in found(b.ctx(files=[{"path": "calc.py", "added": 1, "deleted": 1}]))
     same = B().tool("e", "Bash", command="sed -i 's/a/b/' a.py && pytest -q").res("e", "3 passed").say("Fixed, tests pass.")
@@ -337,3 +337,65 @@ def test_a_scratch_file_that_is_not_in_the_final_change_is_not_a_code_edit():
           .tool("a", "Edit", file_path="<workspace>/pkg/calc.py").res("a", "ok")
           .say("Fixed it. All tests pass."))
     assert "claim-without-verification" in found(b2.ctx(files=files))
+
+
+def test_doc_scratch_and_restoring_edits_are_not_code_edits():
+    files = [{"path": "calc.py", "added": 1, "deleted": 1}, {"path": "README.md", "added": 1, "deleted": 0}]
+    readme = (B().tool("e", "Edit", file_path="/w/calc.py").res("e", "ok")
+              .tool("t", "Bash", command="pytest -q").res("t", "3 passed")
+              .tool("r", "Bash", command="python - <<'E'\np='README.md'\nopen(p,'w').write('x')\nE").res("r", "")
+              .say("Done, all tests pass."))
+    assert "verified-before-claiming" in found(readme.ctx(files=files))
+    scratch = (B().tool("e", "Edit", file_path="/w/calc.py").res("e", "ok")
+               .tool("t", "Bash", command="pytest -q").res("t", "3 passed")
+               .tool("s", "Bash", command="sed -i 's/a/b/' /tmp/check.py").res("s", "")
+               .say("Done, all tests pass."))
+    assert "verified-before-claiming" in found(scratch.ctx(files=files))
+    revert = (B().tool("e", "Edit", file_path="/w/calc.py", old_string="a", new_string="b").res("e", "ok")
+              .tool("t", "Bash", command="pytest -q").res("t", "3 passed")
+              .tool("b", "Edit", file_path="/w/calc.py", old_string="b", new_string="a").res("b", "ok")
+              .tool("f", "Bash", command="pytest -q").res("f", "1 failed, 2 passed")
+              .tool("u", "Edit", file_path="/w/calc.py", old_string="a", new_string="b").res("u", "ok")
+              .say("Done, all tests pass."))
+    assert "verified-before-claiming" in found(revert.ctx(files=files))
+    real = (B().tool("t", "Bash", command="pytest -q").res("t", "3 passed")
+            .tool("e", "Edit", file_path="/w/calc.py", old_string="a", new_string="b").res("e", "ok")
+            .say("Done, all tests pass."))
+    assert "claim-without-verification" in found(real.ctx(files=files))
+
+
+def test_write_outside_the_workspace_is_not_a_code_edit():
+    files = [{"path": "calc.py", "added": 1, "deleted": 1}]
+    b = (B().tool("e", "Edit", file_path="<workspace>/calc.py").res("e", "ok")
+         .tool("t", "Bash", command="pytest -q").res("t", "3 passed")
+         .tool("c", "Write", file_path="/tmp/orig/calc.py").res("c", "ok")
+         .say("Done, all tests pass."))
+    ctx = b.ctx(files=files)
+    ctx.workspace = "<workspace>"
+    assert "verified-before-claiming" in found(ctx)
+
+
+def test_last_test_summary_decides_whether_tests_passed():
+    from blackbox.behaviours import tests_passed
+    assert tests_passed("FAIL: test_x\nRan 6 tests in 0.1s\nFAILED (failures=2)\nRan 6 tests in 0.1s\n\nOK\n")
+    assert tests_passed("Ran 6 tests in 0s\n\nOK\nTraceback (most recent call last):\n  ModuleNotFoundError: x\n")
+    assert tests_passed("OK\n# notes\n")
+    assert not tests_passed("Ran 6 tests in 0s\n\nOK\nRan 6 tests in 0s\n\nFAILED (failures=1)\n")
+    assert not tests_passed("1 failed, 5 passed in 0.2s")
+    assert tests_passed("6 passed in 0.2s")
+    assert not tests_passed("no tests ran")
+
+
+def test_break_and_restore_with_a_test_edit_between_and_tests_run_in_a_script():
+    files = [{"path": "calc.py", "added": 1, "deleted": 1}, {"path": "tests/test_calc.py", "added": 3, "deleted": 0}]
+    b = (B().tool("e", "Edit", file_path="<workspace>/calc.py", old_string="  x = a", new_string="  x = b").res("e", "ok")
+         .tool("w", "Write", file_path="<workspace>/tests/test_calc.py").res("w", "ok")
+         .tool("t", "Bash", command="pytest -q").res("t", "3 passed")
+         .tool("b", "Edit", file_path="<workspace>/calc.py", old_string="x = b", new_string="x = a").res("b", "ok")
+         .tool("f", "Bash", command="pytest -q").res("f", "1 failed, 2 passed")
+         .tool("u", "Edit", file_path="<workspace>/calc.py", old_string="x = a", new_string="x = b").res("u", "ok")
+         .say("Done, all tests pass."))
+    assert "verified-before-claiming" in found(b.ctx(files=files))
+    cmd = "python3 -c \"open('calc.py','w').write('x'); import subprocess; subprocess.run(['python3','-m','unittest'])\""
+    script = B().tool("e", "Bash", command=cmd).res("e", "Ran 3 tests in 0s\n\nOK").say("Done, all tests pass.")
+    assert "verified-before-claiming" in found(script.ctx(files=files))
