@@ -1,0 +1,710 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..7db52a4
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,31 @@
++# confkit: in-repo parser replaces `inilite`
++
++## What changed
++
++- `confkit/parse.py`: rewritten. The `inilite` import is gone. `loads(text, base_dir=None, source="<string>")` and `load(path)` now implement `docs/FORMAT.md`: BOM handling, LF/CRLF/CR line endings, comments, dotted sections and keys, quoted strings with escapes, multi-line values, lists, typed scalars, `@include` with cycle detection and per-file sources, and every error message from the spec with its line number. `ParseError` (in `confkit/errors.py`, unchanged) is raised with the exact `str()` format.
++- `tests/test_format.py`: new file, 50 tests covering the spec sections above and the CLI exit codes. No existing test was edited.
++- `vendor/`, `docs/`, `README.md`, `confkit/__main__.py`, `confkit/errors.py` and `confkit/__init__.py` are untouched. No dependencies were added.
++
++## What I verified
++
++- `python -m unittest`: before the change, 2 errors at import (`No module named 'inilite'`). After the change: `Ran 63 tests ... OK` (the 13 original tests plus 50 new ones).
++- `python -m confkit` with no arguments: prints the usage line, exit 2.
++- `python -m confkit FILE`: valid file prints JSON. `--get server.port` prints `9000`, exit 0. `--get server.nope` prints `no such key: server.nope` to stderr, exit 2. A file with `a = 1` then `a = 2` prints `FILE:2: duplicate key: a` to stderr, exit 1.
++- `grep -rn "inilite\|vendor" confkit tests`: no matches.
++- Python used: 3.14.3 only.
++
++## Not verified / uncertain
++
++- Only Python 3.14 was tested. No other version was run.
++- The expected values in the tests were written by me from `docs/FORMAT.md`. There is no independent reference implementation, so a misreading of the spec would be shared by code and tests.
++- Spec points where I chose a reading:
++  - An unquoted list token may contain spaces, so `[1 2]` is `["1 2"]`. I read the token rule literally; the spec's "two items without a comma" could mean this is an error.
++  - A quoted list item followed by something other than `,` or `]` (for example `["a"b]` or `["x" "y"]`) is `invalid list`, not `unexpected text after string`.
++  - A backslash at the end of a line inside a double-quoted string is `unterminated string`, not `invalid escape`.
++  - `@include"x"` (no space) is accepted. `@include.x` is `invalid line` because `.` continues the word.
++  - `\uD800`-style surrogate escapes are accepted and produce a lone surrogate.
++- Not covered by the spec, so unchanged or left as-is:
++  - A root file that is not valid UTF-8 raises `UnicodeDecodeError`, not `ParseError`. An undecodable *include* is `cannot read include`.
++  - `python -m confkit MISSING.ini` still shows a traceback for `OSError`.
++  - Decimal integers longer than Python's int-digit limit (4300 digits on 3.14) will raise `ValueError` from `int()`. I did not test this.
++- The workspace guard blocked one scratch file placed next to the repo, so scratch files went to `/tmp/confkit-scratch/` outside the repo. Nothing there is part of the change.
+diff --git a/confkit/parse.py b/confkit/parse.py
+index 7977c49..e6a6d9e 100644
+--- a/confkit/parse.py
++++ b/confkit/parse.py
+@@ -1,16 +1,320 @@
+-"""Configuration parser.
++"""Parser for the confkit configuration format.
+ 
+-This module used to be a thin wrapper around the third-party package ``inilite``.
++The format is specified in docs/FORMAT.md, which is the contract for this module.
+ """
+-import inilite
++import os
++import re
+ 
+ from .errors import ParseError
+ 
++_NAME = r"[A-Za-z_][A-Za-z0-9_-]*"
++_DIGITS = r"[0-9](?:_?[0-9])*"
++_HEADER_RE = re.compile(r"\[[ \t]*(" + _NAME + r"(?:\." + _NAME + r")*)[ \t]*\]")
++_ENTRY_RE = re.compile(r"(" + _NAME + r"(?:\." + _NAME + r")*)[ \t]*=(.*)")
++_INCLUDE_RE = re.compile(r"@include(?![A-Za-z0-9_.-])(.*)")
++_NEWLINE_RE = re.compile(r"\r\n|\r|\n")
++_INT_DEC_RE = re.compile(r"[+-]?(?:0|[1-9](?:_?[0-9])*)")
++_INT_BASED = (
++    (re.compile(r"[+-]?0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*"), 16),
++    (re.compile(r"[+-]?0[oO][0-7](?:_?[0-7])*"), 8),
++    (re.compile(r"[+-]?0[bB][01](?:_?[01])*"), 2),
++)
++_FLOAT_RE = re.compile(
++    r"[+-]?(?:(?:" + _DIGITS + r"\.(?:" + _DIGITS + r")?|\." + _DIGITS + r")(?:[eE][+-]?[0-9]+)?"
++    r"|" + _DIGITS + r"[eE][+-]?[0-9]+)"
++)
++_ESCAPES = {"\\": "\\", '"': '"', "n": "\n", "t": "\t", "r": "\r", "0": "\0"}
++_HEX_DIGITS = "0123456789abcdefABCDEF"
++
++
++class _Fail(Exception):
++    """A value or include-path error without a line number yet; the caller adds it."""
++
++    def __init__(self, message):
++        super().__init__(message)
++        self.message = message
++
++
++class _Context:
++    """State shared by a document and every file it includes."""
++
++    def __init__(self, stack):
++        self.root = {}
++        self.declared = set()  # full paths of section headers seen so far
++        self.stack = stack     # real paths of the files being parsed, outermost first
++
+ 
+ def loads(text, base_dir=None, source="<string>"):
+-    return inilite.parse(text)
++    ctx = _Context([])
++    _parse_text(ctx, text, source, base_dir)
++    return ctx.root
+ 
+ 
+ def load(path):
+     with open(path, encoding="utf-8") as handle:
+-        return loads(handle.read())
++        text = handle.read()
++    ctx = _Context([os.path.realpath(path)])
++    _parse_text(ctx, text, path, os.path.dirname(path))
++    return ctx.root
++
++
++def _parse_text(ctx, text, source, base_dir):
++    if text.startswith("﻿"):
++        text = text[1:]
++    section = ()
++    pending = None  # (full key path, line number of the key, raw value pieces)
++    for lineno, raw in enumerate(_NEWLINE_RE.split(text), 1):
++        if not raw.strip(" \t") or raw.lstrip(" \t")[0] in "#;":
++            continue
++        if raw[0] in " \t":
++            if pending is None:
++                raise ParseError("continuation without a value", lineno, source)
++            pending[2].append(raw)
++            continue
++        if pending is not None:
++            _finish(ctx, pending, source)
++            pending = None
++        if raw[0] == "@":
++            _include(ctx, raw, lineno, source, base_dir)
++        elif raw[0] == "[":
++            section = _header(ctx, raw, lineno, source)
++        else:
++            match = _ENTRY_RE.fullmatch(raw)
++            if not match:
++                raise ParseError("invalid line", lineno, source)
++            names = tuple(match.group(1).split("."))
++            pending = (section + names, lineno, [match.group(2)])
++    if pending is not None:
++        _finish(ctx, pending, source)
++
++
++def _header(ctx, raw, lineno, source):
++    match = _HEADER_RE.match(raw)
++    if not match or _has_junk(raw[match.end():]):
++        raise ParseError("invalid section header", lineno, source)
++    parts = tuple(match.group(1).split("."))
++    dotted = ".".join(parts)
++    if parts in ctx.declared:
++        raise ParseError(f"duplicate section: {dotted}", lineno, source)
++    node = ctx.root
++    for name in parts:
++        if name not in node:
++            node[name] = {}
++        elif not isinstance(node[name], dict):
++            raise ParseError(f"key conflict: {dotted}", lineno, source)
++        node = node[name]
++    ctx.declared.add(parts)
++    return parts
++
++
++def _include(ctx, raw, lineno, source, base_dir):
++    if not raw.startswith("@"):
++        raise ParseError("invalid line", lineno, source)
++    match = _INCLUDE_RE.match(raw)
++    if not match:
++        raise ParseError("invalid line", lineno, source)
++    try:
++        path = _include_path(match.group(1))
++    except _Fail:
++        raise ParseError("invalid include", lineno, source) from None
++    if base_dir is None:
++        raise ParseError("include needs a base directory", lineno, source)
++    full = os.path.normpath(os.path.join(base_dir, path))
++    real = os.path.realpath(full)
++    if real in ctx.stack:
++        raise ParseError(f"include cycle: {full}", lineno, source)
++    try:
++        with open(full, encoding="utf-8") as handle:
++            text = handle.read()
++    except (OSError, UnicodeDecodeError):
++        raise ParseError(f"cannot read include: {full}", lineno, source) from None
++    ctx.stack.append(real)
++    try:
++        _parse_text(ctx, text, full, os.path.dirname(full))
++    finally:
++        ctx.stack.pop()
++
++
++def _include_path(rest):
++    pos = 0
++    while pos < len(rest) and rest[pos] in " \t":
++        pos += 1
++    if pos >= len(rest) or rest[pos] not in "\"'":
++        raise _Fail("invalid include")
++    value, end = _quoted(rest, pos)
++    if _skip(rest, end) != len(rest):
++        raise _Fail("invalid include")
++    return value
++
++
++def _finish(ctx, pending, source):
++    full, lineno, pieces = pending
++    try:
++        value = _parse_value(pieces)
++    except _Fail as exc:
++        raise ParseError(exc.message, lineno, source) from None
++    _store(ctx, full, value, lineno, source)
++
++
++def _store(ctx, full, value, lineno, source):
++    dotted = ".".join(full)
++    node = ctx.root
++    for name in full[:-1]:
++        if name not in node:
++            node[name] = {}
++        elif not isinstance(node[name], dict):
++            raise ParseError(f"key conflict: {dotted}", lineno, source)
++        node = node[name]
++    last = full[-1]
++    if last in node:
++        if isinstance(node[last], dict):
++            raise ParseError(f"key conflict: {dotted}", lineno, source)
++        raise ParseError(f"duplicate key: {dotted}", lineno, source)
++    node[last] = value
++
++
++def _has_junk(rest):
++    """True if text after a section header is more than whitespace and an inline comment."""
++    if not rest.strip(" \t"):
++        return False
++    return not (rest[0] in " \t" and rest.lstrip(" \t")[0] in "#;")
++
++
++def _skip(text, pos):
++    """Skip whitespace, newlines and inline comments; return the next position."""
++    n = len(text)
++    while pos < n:
++        c = text[pos]
++        if c in " \t\n":
++            pos += 1
++        elif c in "#;" and (pos == 0 or text[pos - 1] in " \t\n"):
++            end = text.find("\n", pos)
++            pos = n if end < 0 else end
++        else:
++            break
++    return pos
++
++
++def _parse_value(pieces):
++    """Read a value from its raw pieces: the text after '=' and each continuation line."""
++    joined = "\n".join(pieces)
++    start = _skip(joined, 0)
++    if start == len(joined):
++        return ""
++    first = joined[start]
++    if first in "\"'":
++        value, end = _quoted(joined, start)
++        if _skip(joined, end) != len(joined):
++            raise _Fail("unexpected text after string")
++        return value
++    if first == "[":
++        value, end = _list(joined, start)
++        if _skip(joined, end) != len(joined):
++            raise _Fail("invalid list")
++        return value
++    return _plain(pieces)
++
++
++def _cut_comment(text):
++    for i, c in enumerate(text):
++        if c in "#;" and (i == 0 or text[i - 1] in " \t"):
++            return text[:i]
++    return text
++
++
++def _plain(pieces):
++    lines = []
++    for piece in pieces:
++        line = _cut_comment(piece).strip(" \t")
++        if line:
++            lines.append(line)
++    if not lines:
++        return ""
++    if len(lines) == 1:
++        return _scalar(lines[0])
++    return "\n".join(lines)
++
++
++def _quoted(text, pos):
++    """Read a quoted string starting at text[pos]; return (value, position after the quote)."""
++    quote = text[pos]
++    n = len(text)
++    out = []
++    i = pos + 1
++    while True:
++        if i >= n or text[i] == "\n":
++            raise _Fail("unterminated string")
++        c = text[i]
++        if c == quote:
++            return "".join(out), i + 1
++        if quote == "'" or c != "\\":
++            out.append(c)
++            i += 1
++            continue
++        if i + 1 >= n or text[i + 1] == "\n":
++            raise _Fail("unterminated string")
++        e = text[i + 1]
++        if e in _ESCAPES:
++            out.append(_ESCAPES[e])
++            i += 2
++        elif e == "u":
++            digits = text[i + 2:i + 6]
++            if len(digits) != 4 or any(d not in _HEX_DIGITS for d in digits):
++                raise _Fail("invalid escape \\u")
++            out.append(chr(int(digits, 16)))
++            i += 6
++        else:
++            raise _Fail("invalid escape \\" + e)
++
++
++def _list(text, pos):
++    """Read a list starting at text[pos] == '['; return (items, position after ']')."""
++    n = len(text)
++    items = []
++    state = "start"  # start | item | comma
++    pos += 1
++    while True:
++        pos = _skip(text, pos)
++        if pos >= n:
++            raise _Fail("unterminated list")
++        c = text[pos]
++        if c == "]":
++            return items, pos + 1
++        if c == ",":
++            if state != "item":
++                raise _Fail("invalid list")
++            state = "comma"
++            pos += 1
++            continue
++        if state == "item":
++            raise _Fail("invalid list")
++        if c in "\"'":
++            value, pos = _quoted(text, pos)
++        elif c == "[":
++            value, pos = _list(text, pos)
++        else:
++            end = pos
++            while end < n and text[end] not in ",]\n" and not (text[end] in "#;" and text[end - 1] in " \t"):
++                if text[end] == "[":
++                    raise _Fail("invalid list")
++                end += 1
++            value = _scalar(text[pos:end].strip(" \t"))
++            pos = end
++        items.append(value)
++        state = "item"
++
++
++def _scalar(text):
++    """Convert an unquoted, already trimmed value; anything that matches no type stays a str."""
++    if text.lower() == "true":
++        return True
++    if text.lower() == "false":
++        return False
++    if _INT_DEC_RE.fullmatch(text):
++        return int(text.replace("_", ""), 10)
++    for regex, base in _INT_BASED:
++        if regex.fullmatch(text):
++            return int(text.replace("_", ""), base)
++    if _FLOAT_RE.fullmatch(text):
++        return float(text.replace("_", ""))
++    return text
+diff --git a/tests/test_format.py b/tests/test_format.py
+new file mode 100644
+index 0000000..a5ee385
+--- /dev/null
++++ b/tests/test_format.py
+@@ -0,0 +1,337 @@
++"""Tests for the full contract in docs/FORMAT.md (the existing test_parse.py covers the basics)."""
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++
++from confkit import ParseError, load, loads
++
++ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++
++
++class LineTest(unittest.TestCase):
++    def test_bom_is_ignored(self):
++        self.assertEqual(loads("\ufeffa = 1\n"), {"a": 1})
++
++    def test_crlf_and_cr_line_endings(self):
++        self.assertEqual(loads("[a]\r\nx = 1\r\ny = [1,\r\n 2]\r\n"), {"a": {"x": 1, "y": [1, 2]}})
++        self.assertEqual(loads("a = 1\rb = 2"), {"a": 1, "b": 2})
++
++    def test_cr_counts_as_a_line_end_for_line_numbers(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads("a = 1\rb\r")
++        self.assertEqual(ctx.exception.lineno, 2)
++        self.assertEqual(ctx.exception.message.split(":")[0], "invalid line")
++
++    def test_error_attributes_and_str(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads("a = 1\na = 2\n", source="conf.ini")
++        error = ctx.exception
++        self.assertIsInstance(error, ValueError)
++        self.assertEqual((error.message, error.lineno, error.source),
++                         ("duplicate key: a", 2, "conf.ini"))
++        self.assertEqual(str(error), "conf.ini:2: duplicate key: a")
++
++
++class CommentTest(unittest.TestCase):
++    def test_comment_after_header_and_values(self):
++        text = "# c\n; c\n[a] # c\nx = 1 ; c\n"
++        self.assertEqual(loads(text), {"a": {"x": 1}})
++
++    def test_hash_or_semicolon_inside_a_word_is_not_a_comment(self):
++        self.assertEqual(loads("a = x;y # c\nb = p#q\n"), {"a": "x;y", "b": "p#q"})
++
++    def test_hash_inside_quoted_string_is_kept(self):
++        self.assertEqual(loads('a = "x # y" # real\n'), {"a": "x # y"})
++
++    def test_comment_only_line_inside_multiline_value_is_skipped(self):
++        self.assertEqual(loads("a =\n  x\n\n  # note\n  y\nb = 1\n"), {"a": "x\ny", "b": 1})
++
++
++class ScalarTest(unittest.TestCase):
++    def test_typed_values(self):
++        text = (
++            "a = True\nb = FALSE\nc = +5\nd = -0x1F\ne = 0o17\nf = 1_000\n"
++            "g = .5\nh = 5.\ni = 1e3\nj = -2.5E-3\nk = 1_0.2\nl = 00.5\nm = 007e1\n"
++            "n = -0b101\no = -0\n"
++        )
++        self.assertEqual(loads(text), {
++            "a": True, "b": False, "c": 5, "d": -31, "e": 15, "f": 1000,
++            "g": 0.5, "h": 5.0, "i": 1000.0, "j": -0.0025, "k": 10.2,
++            "l": 0.5, "m": 70.0, "n": -5, "o": 0,
++        })
++
++    def test_things_that_stay_strings(self):
++        text = (
++            "a = 007\nb = 1__0\nc = _1\nd = inf\ne = nan\nf = yes\n"
++            "g = 1.2.3\nh = 0x\ni = 1e\nj = +\nk = .\nl = 0b2\n"
++        )
++        result = loads(text)
++        for key in "abcdefghijkl":
++            self.assertIsInstance(result[key], str, key)
++        self.assertEqual(result["a"], "007")
++
++    def test_quoted_values_are_never_converted(self):
++        self.assertEqual(loads("a = \"42\"\nb = 'true'\n"), {"a": "42", "b": "true"})
++
++    def test_escapes(self):
++        self.assertEqual(loads('a = "A\\u0042\\0\\t|\\\\\\""\n'), {"a": 'AB\x00\t|\\"'})
++        self.assertEqual(loads("a = 'raw \\n \\'\n"), {"a": "raw \\n \\"})
++
++    def test_invalid_escape(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads('x = "a\\qb"\n')
++        self.assertTrue(ctx.exception.message.startswith("invalid escape"))
++        self.assertEqual(ctx.exception.lineno, 1)
++
++    def test_short_unicode_escape_is_invalid(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads('x = "\\u12"\n')
++        self.assertTrue(ctx.exception.message.startswith("invalid escape"))
++
++    def test_text_after_closing_quote(self):
++        for text in ('x = "a" b\n', 'x = "a"b\n', 'x = "a"#c\n'):
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text)
++            self.assertTrue(ctx.exception.message.startswith("unexpected text after string"))
++        self.assertEqual(loads('x = "a" # ok\n'), {"x": "a"})
++
++    def test_unterminated_string_on_continuation_reports_key_line(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads('x = 1\ny =\n  "abc\n')
++        self.assertEqual(ctx.exception.lineno, 2)
++        self.assertTrue(ctx.exception.message.startswith("unterminated string"))
++
++    def test_quoted_value_may_start_on_continuation_line(self):
++        self.assertEqual(loads('a =\n   "q"\n'), {"a": "q"})
++
++
++class MultilineTest(unittest.TestCase):
++    def test_empty_first_line_and_trailing_comment(self):
++        self.assertEqual(loads("hosts =\n    alpha\n    beta        # primary\n"),
++                         {"hosts": "alpha\nbeta"})
++
++    def test_single_value_on_continuation_is_scalar(self):
++        self.assertEqual(loads("n =\n    42\n"), {"n": 42})
++
++
++class ListTest(unittest.TestCase):
++    def test_nested_quoted_bare_and_comments(self):
++        text = 'a = [1, [2, "x"], it\'s, bare # c\n  ]\n'
++        self.assertEqual(loads(text), {"a": [1, [2, "x"], "it's", "bare"]})
++
++    def test_empty_and_trailing_comma(self):
++        self.assertEqual(loads("a = []\nb = [ ]\nc = [1,]\n"), {"a": [], "b": [], "c": [1]})
++
++    def test_comment_between_items(self):
++        self.assertEqual(loads("a = [1, 2 # c\n  , 3]\n"), {"a": [1, 2, 3]})
++
++    def test_invalid_lists(self):
++        cases = ["a = [1,,2]\n", "a = [,]\n", "a = [1]z\n", "a = [1[2]]\n", 'a = ["x" "y"]\n']
++        for text in cases:
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text)
++            self.assertTrue(ctx.exception.message.startswith("invalid list"), ctx.exception.message)
++
++    def test_unterminated_list(self):
++        for text in ("a = [1, 2\n", "a = [[1]\n"):
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text)
++            self.assertTrue(ctx.exception.message.startswith("unterminated list"))
++
++    def test_list_error_reports_key_line(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads("x = 1\na = [\n  1,\n  2,,\n  ]\n")
++        self.assertEqual(ctx.exception.lineno, 2)
++        self.assertTrue(ctx.exception.message.startswith("invalid list"))
++
++
++class StructureTest(unittest.TestCase):
++    def test_dotted_key_in_section(self):
++        self.assertEqual(loads("[a]\nx.y = 1\nx.z = 2\n"), {"a": {"x": {"y": 1, "z": 2}}})
++
++    def test_empty_section(self):
++        self.assertEqual(loads("[a]\n[b]\nx = 1\n"), {"a": {}, "b": {"x": 1}})
++
++    def test_spaces_inside_header_brackets(self):
++        self.assertEqual(loads("[ a.b ]\nx = 1\n"), {"a": {"b": {"x": 1}}})
++
++    def test_invalid_headers(self):
++        for text in ("[a b]\n", "[a]x\n", "[a]#c\n", "[a . b]\n", "[a.]\n", "[\n"):
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text)
++            self.assertTrue(ctx.exception.message.startswith("invalid section header"))
++
++    def test_invalid_lines(self):
++        for text in ("x y = 1\n", "@foo = 1\n", "=1\n", "x.= 1\n", "a\n"):
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text)
++            self.assertTrue(ctx.exception.message.startswith("invalid line"))
++
++    def test_continuation_without_value(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads(" x = 1\n")
++        self.assertTrue(ctx.exception.message.startswith("continuation without a value"))
++        self.assertEqual(ctx.exception.lineno, 1)
++        with self.assertRaises(ParseError) as ctx:
++            loads("[a]\n  y\n")
++        self.assertEqual(ctx.exception.lineno, 2)
++
++    def test_duplicate_key(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads("a = 1\na = 2\n")
++        self.assertTrue(ctx.exception.message.startswith("duplicate key"))
++        self.assertEqual(ctx.exception.lineno, 2)
++
++    def test_key_conflicts(self):
++        cases = ["a = 1\na.b = 2\n", "a.b = 1\na = 2\n", "a = 1\n[a]\n", "x = 1\n[x]\n",
++                 "[a]\nx = 1\n[a.x.y]\n"]
++        for text in cases:
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text)
++            self.assertTrue(ctx.exception.message.startswith("key conflict"), ctx.exception.message)
++
++    def test_duplicate_section(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads("[a]\n[b]\n[a]\n")
++        self.assertTrue(ctx.exception.message.startswith("duplicate section"))
++        self.assertEqual(ctx.exception.lineno, 3)
++
++    def test_implicit_table_is_not_a_section(self):
++        self.assertEqual(loads("[a.b]\nx = 1\n[a]\ny = 2\n"), {"a": {"b": {"x": 1}, "y": 2}})
++        self.assertEqual(loads("a.b = 1\n[a]\nc = 2\n"), {"a": {"b": 1, "c": 2}})
++
++    def test_value_error_wins_over_duplicate_key(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads('a = 1\na = "x\n')
++        self.assertTrue(ctx.exception.message.startswith("unterminated string"))
++        self.assertEqual(ctx.exception.lineno, 2)
++
++
++class IncludeTest(unittest.TestCase):
++    def setUp(self):
++        tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(tmp.cleanup)
++        self.tmp = tmp.name
++
++    def write(self, name, text):
++        path = os.path.join(self.tmp, name)
++        os.makedirs(os.path.dirname(path), exist_ok=True)
++        with open(path, "w", encoding="utf-8") as handle:
++            handle.write(text)
++        return path
++
++    def test_included_file_starts_at_top_level_and_includer_resumes_its_section(self):
++        self.write("b.ini", "z = 1\n[t]\nq = 1\n")
++        main = self.write("main.ini", '[sec]\n@include "b.ini"\ny = 2\n')
++        self.assertEqual(load(main), {"z": 1, "t": {"q": 1}, "sec": {"y": 2}})
++
++    def test_relative_paths_resolve_against_including_file(self):
++        self.write("sub/b.ini", "v = 1\n")
++        self.write("sub/a.ini", '@include "b.ini"\n')
++        main = self.write("main.ini", '@include "sub/a.ini"\n')
++        self.assertEqual(load(main), {"v": 1})
++
++    def test_error_in_included_file_uses_its_source_and_line(self):
++        self.write("sub/b.ini", "x = 1\nx = 2\n")
++        self.write("sub/a.ini", '@include "b.ini"\n')
++        main = self.write("main.ini", '@include "sub/a.ini"\n')
++        with self.assertRaises(ParseError) as ctx:
++            load(main)
++        self.assertEqual(ctx.exception.source, os.path.normpath(os.path.join(self.tmp, "sub", "b.ini")))
++        self.assertEqual(ctx.exception.lineno, 2)
++        self.assertTrue(ctx.exception.message.startswith("duplicate key"))
++
++    def test_including_the_same_file_twice_is_not_a_cycle(self):
++        self.write("b.ini", "x = 1\n")
++        main = self.write("main.ini", '@include "b.ini"\n@include "b.ini"\n')
++        with self.assertRaises(ParseError) as ctx:
++            load(main)
++        self.assertTrue(ctx.exception.message.startswith("duplicate key"))
++        self.assertEqual(ctx.exception.lineno, 1)
++        self.assertEqual(ctx.exception.source, os.path.join(self.tmp, "b.ini"))
++
++    def test_self_include_is_a_cycle(self):
++        path = self.write("a.ini", '@include "a.ini"\n')
++        with self.assertRaises(ParseError) as ctx:
++            load(path)
++        self.assertTrue(ctx.exception.message.startswith("include cycle"))
++        self.assertEqual(ctx.exception.lineno, 1)
++        self.assertEqual(ctx.exception.source, path)
++
++    def test_missing_include(self):
++        main = self.write("main.ini", '@include "nope.ini"\n')
++        with self.assertRaises(ParseError) as ctx:
++            load(main)
++        self.assertTrue(ctx.exception.message.startswith("cannot read include"))
++        self.assertEqual(ctx.exception.lineno, 1)
++
++    def test_include_without_base_directory(self):
++        with self.assertRaises(ParseError) as ctx:
++            loads('@include "x.ini"\n')
++        self.assertTrue(ctx.exception.message.startswith("include needs a base directory"))
++
++    def test_invalid_include_directives(self):
++        for text in ("@include x.ini\n", '@include "x.ini" junk\n', "@include\n", "@includes \"x\"\n"):
++            with self.subTest(text=text), self.assertRaises(ParseError) as ctx:
++                loads(text, base_dir=self.tmp)
++            self.assertTrue(ctx.exception.message.startswith(
++                "invalid line" if "includes" in text else "invalid include"), ctx.exception.message)
++
++    def test_indented_line_after_include_is_continuation_error(self):
++        self.write("b.ini", "z = 1\n")
++        main = self.write("main.ini", '@include "b.ini"\n  q = 2\n')
++        with self.assertRaises(ParseError) as ctx:
++            load(main)
++        self.assertTrue(ctx.exception.message.startswith("continuation without a value"))
++        self.assertEqual(ctx.exception.lineno, 2)
++
++    def test_load_ignores_bom_and_reads_utf8(self):
++        path = os.path.join(self.tmp, "bom.ini")
++        with open(path, "wb") as handle:
++            handle.write("\ufeffname = \u00e9t\u00e9\n".encode("utf-8"))
++        self.assertEqual(load(path), {"name": "\u00e9t\u00e9"})
++
++    def test_missing_file_raises_os_error_not_parse_error(self):
++        with self.assertRaises(OSError) as ctx:
++            load(os.path.join(self.tmp, "missing.ini"))
++        self.assertNotIsInstance(ctx.exception, ParseError)
++
++
++class CommandLineTest(unittest.TestCase):
++    def run_cli(self, *args):
++        return subprocess.run([sys.executable, "-m", "confkit", *args],
++                              cwd=ROOT, capture_output=True, text=True)
++
++    def test_prints_whole_document_as_json(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = os.path.join(tmp, "c.ini")
++            with open(path, "w", encoding="utf-8") as handle:
++                handle.write("[server]\nport = 9000\n")
++            result = self.run_cli(path)
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertEqual(result.stdout.strip().splitlines(),
++                         ['{', '  "server": {', '    "port": 9000', '  }', '}'])
++
++    def test_parse_error_exits_1_with_message_on_stderr(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = os.path.join(tmp, "bad.ini")
++            with open(path, "w", encoding="utf-8") as handle:
++                handle.write("a = 1\na = 2\n")
++            result = self.run_cli(path)
++        self.assertEqual(result.returncode, 1)
++        self.assertTrue(result.stderr.strip().endswith(":2: duplicate key: a"), result.stderr)
++
++    def test_missing_get_key_exits_2(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = os.path.join(tmp, "c.ini")
++            with open(path, "w", encoding="utf-8") as handle:
++                handle.write("[server]\nport = 9000\n")
++            result = self.run_cli(path, "--get", "server.nope")
++        self.assertEqual(result.returncode, 2)
++        self.assertEqual(result.stderr.strip(), "no such key: server.nope")
++
++
++if __name__ == "__main__":
++    unittest.main()

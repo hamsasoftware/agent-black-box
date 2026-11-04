@@ -1,0 +1,776 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 50c64de..49da6c3 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,10 @@
+ 
+ - `reports.weight_bands` counts units per weight band.
+ 
++### Changed
++
++- Weights are now kilograms: `weight_kg` (canonical decimal string, e.g. `"0.250"`) replaces `weight_g` in `Item`, `Parcel`, `quote`, `storage` (schema 2) and the `add` command. Schema 1 files still load. `export.to_csv` and `export.carrier_payload` stay in grams. See `docs/MIGRATION.md`.
++
+ ## [1.4.2] - 2026-09-12
+ 
+ ### Fixed
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..d7a5918
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,44 @@
++# Summary: grams to kilograms (shipcalc 2.0.0)
++
++## What changed
++
++Every weight in `shipcalc/` now follows `docs/MIGRATION.md`.
++
++- **units.py**: `to_grams` is replaced by `normalize_kg` (canonical `"0.250"` strings, rounding half to even to three places, `WeightError` for invalid input), `kg_to_g` and `g_to_kg`. `WeightError` subclasses `ValueError`.
++- **models.py**: `Item(sku, weight_kg, qty)`, `weight_kg`, `line_weight_kg()`, `to_dict()`/`from_dict()` use `weight_kg`. Docstring table line is now `weight_kg: kg, 0.001..1000.000`.
++- **validate.py**: the parser reads the new `kg` kind and decimal bounds. A weight is rounded first, then range-checked. Invalid input gives `weight_kg: invalid weight: ...`. A dict with only `weight_g` gives `weight_kg: missing`.
++- **calc.py / limits.py**: `order_weight_kg`, `quote()["weight_kg"]`, `check_total_kg` with the 2147483.647 kg limit, raising `WeightError`.
++- **rates.py**: `shipping_cents(weight_kg, zone)`, same costs (thresholds 0.500 kg and 10.000 kg).
++- **packing.py**: `Parcel.weight_kg`, same first-fit-decreasing order, 20.000 kg limit.
++- **reports.py**: `average_weight_kg` (half-even, `"0.000"` when empty), numeric `heaviest`, same weight bands on kg thresholds.
++- **format.py**: `format_weight` gives `"<canonical> kg"`.
++- **cache.py**: `quote:v2:<zone>:<total kg>:<lines>`.
++- **storage.py**: writes schema 2 with `weight_kg`. Loads schema 2 (normalised) and schema 1 (`weight_g` converted exactly). Other schemas raise `ValueError`.
++- **export.py**: `to_csv` and `carrier_payload` stay in integer grams.
++- **cli.py**: `add` takes `WEIGHT_KG`. Any `ValueError`, including `WeightError`, prints `error: ...` and exits 2. The `OverflowError` catch is removed because it is no longer raised.
++- **`__version__`** is `2.0.0`. **CHANGELOG.md** has a `### Changed` entry under Unreleased.
++- **New tests**: `tests/test_migration.py` (34 tests) covers rounding, invalid input, the carrier-limit boundary, averages, storage schema 1 and 2, validation, export, cache key, and CLI.
++- No existing test was edited or deleted.
++
++## What I verified
++
++- `python -m unittest` from the project root: **Ran 46 tests, OK** (the 12 original tests, which failed before, plus 34 new ones).
++- `python -m unittest tests.test_calc tests.test_models tests.test_rates`: **Ran 12 tests, OK**.
++- `python -m shipcalc show samples/order.json`: prints `MUG-01 0.350 kg x2`, `BOOK-07 1.200 kg x1`, `total weight: 1.900 kg`. This reads the schema 1 sample.
++- `python -m shipcalc quote samples/order.json --zone eu`: `parcels: 1`, `shipping: 6.70 EUR`, the same cost as before the change.
++- `validate.RULES` parses to `sku` str 1..32, `weight_kg` kg 0.001..1000.000, `qty` int 1..1000.
++- `git status`: only `shipcalc/*.py`, `CHANGELOG.md` and the new `tests/test_migration.py` are changed, plus this file.
++
++## Not verified / open points
++
++- I did not run the real `add` command against `samples/order.json`, because that would rewrite a file outside my allowed set. `add` is covered by `CliTest` in a temp directory.
++- CI itself was not run. I only ran `python -m unittest` locally, Python version not pinned or checked.
++- No linter or type checker was run.
++- **Outside my allowed files, so not changed:**
++  - `README.md` still says "Weights are given in grams". Its example `add samples/order.json LAMP-3 2400 1` now means 2400 kg. The example should become `2.400`.
++  - `samples/order.json` is still schema 1 with `weight_g`. It loads correctly. The first `add` rewrites it as schema 2.
++  - `docs/MIGRATION.md` is unchanged; it is the contract.
++- Judgment calls where the contract was silent:
++  - The docstring kind for the weight line is `kg`, since `str` would not carry the range logic.
++  - The schema check now uses a strict `int` type check. A bool such as `true` is rejected. Before, `True == 1` made it pass as schema 1. This is a small behaviour change.
++  - Packing and the sums of order weight are computed in integer grams internally. The stored values are kilogram strings.
+diff --git a/shipcalc/__init__.py b/shipcalc/__init__.py
+index 432426e..501d1a8 100644
+--- a/shipcalc/__init__.py
++++ b/shipcalc/__init__.py
+@@ -1,3 +1,3 @@
+ """shipcalc: order weight and shipping cost calculator."""
+ 
+-__version__ = "1.4.2"
++__version__ = "2.0.0"
+diff --git a/shipcalc/cache.py b/shipcalc/cache.py
+index 31450bd..6792b3b 100644
+--- a/shipcalc/cache.py
++++ b/shipcalc/cache.py
+@@ -1,10 +1,11 @@
+-from .calc import order_weight_g, quote
++from .calc import order_weight_kg, quote
+ 
+ _STORE = {}
+ 
+ 
+ def quote_key(order, zone):
+-    return f"quote:{zone}:{order_weight_g(order)}:{len(order.items)}"
++    # "v2" marks the kg unit change so keys from before the migration are never reused.
++    return f"quote:v2:{zone}:{order_weight_kg(order)}:{len(order.items)}"
+ 
+ 
+ def cached_quote(order, zone):
+diff --git a/shipcalc/calc.py b/shipcalc/calc.py
+index 5226859..11de6b9 100644
+--- a/shipcalc/calc.py
++++ b/shipcalc/calc.py
+@@ -1,13 +1,16 @@
+-from .limits import check_total_g
++from .limits import check_total_kg
+ from .packing import split_parcels
+ from .rates import shipping_cents
++from .units import g_to_kg, kg_to_g
+ 
+ 
+-def order_weight_g(order):
+-    return check_total_g(sum(item.line_weight_g() for item in order.items))
++def order_weight_kg(order):
++    # Summed in whole grams, which is exact for weights with three decimals.
++    total_g = sum(kg_to_g(item.line_weight_kg()) for item in order.items)
++    return check_total_kg(g_to_kg(total_g))
+ 
+ 
+ def quote(order, zone):
+     parcels = split_parcels(order)
+-    cents = sum(shipping_cents(parcel.weight_g, zone) for parcel in parcels)
+-    return {"parcels": len(parcels), "weight_g": order_weight_g(order), "cents": cents}
++    cents = sum(shipping_cents(parcel.weight_kg, zone) for parcel in parcels)
++    return {"parcels": len(parcels), "weight_kg": order_weight_kg(order), "cents": cents}
+diff --git a/shipcalc/cli.py b/shipcalc/cli.py
+index cf2a4a3..e56b3ab 100644
+--- a/shipcalc/cli.py
++++ b/shipcalc/cli.py
+@@ -1,19 +1,19 @@
+ import sys
+ 
+ from . import storage
+-from .calc import order_weight_g, quote
++from .calc import order_weight_kg, quote
+ from .format import format_table, format_weight
+ from .models import Item
+ 
+ USAGE = """usage: python -m shipcalc show ORDER_JSON
+-       python -m shipcalc add ORDER_JSON SKU WEIGHT_G QTY
++       python -m shipcalc add ORDER_JSON SKU WEIGHT_KG QTY
+        python -m shipcalc quote ORDER_JSON --zone ZONE
+ """
+ 
+ 
+ def _show(order):
+     print(format_table(order))
+-    print(f"total weight: {format_weight(order_weight_g(order))}")
++    print(f"total weight: {format_weight(order_weight_kg(order))}")
+ 
+ 
+ def main(argv=None):
+@@ -23,19 +23,19 @@ def main(argv=None):
+             _show(storage.load(args[1]))
+         elif len(args) == 5 and args[0] == "add":
+             order = storage.load(args[1])
+-            order.add(Item(args[2], int(args[3]), int(args[4])))
++            order.add(Item(args[2], args[3], int(args[4])))
+             storage.save(order, args[1])
+         elif len(args) == 4 and args[0] == "quote" and args[2] == "--zone":
+             order = storage.load(args[1])
+             result = quote(order, args[3])
+             print(f"items: {len(order.items)}")
+-            print(f"total weight: {format_weight(result['weight_g'])}")
++            print(f"total weight: {format_weight(result['weight_kg'])}")
+             print(f"parcels: {result['parcels']}")
+             print(f"shipping: {result['cents'] // 100}.{result['cents'] % 100:02d} EUR")
+         else:
+             sys.stderr.write(USAGE)
+             return 2
+-    except (ValueError, OverflowError) as exc:
++    except ValueError as exc:  # includes WeightError
+         sys.stderr.write(f"error: {exc}\n")
+         return 2
+     return 0
+diff --git a/shipcalc/export.py b/shipcalc/export.py
+index 25336ab..1567775 100644
+--- a/shipcalc/export.py
++++ b/shipcalc/export.py
+@@ -1,13 +1,16 @@
+-from .calc import order_weight_g
++from .calc import order_weight_kg
+ from .packing import split_parcels
++from .units import kg_to_g
+ 
+ 
+ def to_csv(order):
++    # Kept in whole grams for the consuming system.
+     lines = ["sku,weight_g,qty"]
+     for item in order.items:
+-        lines.append(f"{item.sku},{item.weight_g},{item.qty}")
++        lines.append(f"{item.sku},{kg_to_g(item.weight_kg)},{item.qty}")
+     return "\n".join(lines) + "\n"
+ 
+ 
+ def carrier_payload(order):
+-    return {"weight_g": order_weight_g(order), "parcels": len(split_parcels(order))}
++    # Kept in whole grams for the carrier system.
++    return {"weight_g": kg_to_g(order_weight_kg(order)), "parcels": len(split_parcels(order))}
+diff --git a/shipcalc/format.py b/shipcalc/format.py
+index 00c0582..b18674f 100644
+--- a/shipcalc/format.py
++++ b/shipcalc/format.py
+@@ -1,9 +1,10 @@
+-def format_weight(grams):
+-    if grams >= 1000:
+-        return f"{grams / 1000:.1f} kg"
+-    return f"{grams} g"
++from .units import normalize_kg
++
++
++def format_weight(weight_kg):
++    return f"{normalize_kg(weight_kg)} kg"
+ 
+ 
+ def format_table(order):
+-    rows = [f"{item.sku:<12}{format_weight(item.weight_g):>12}  x{item.qty}" for item in order.items]
++    rows = [f"{item.sku:<12}{format_weight(item.weight_kg):>12}  x{item.qty}" for item in order.items]
+     return "\n".join(rows)
+diff --git a/shipcalc/limits.py b/shipcalc/limits.py
+index 39c34e4..6584023 100644
+--- a/shipcalc/limits.py
++++ b/shipcalc/limits.py
+@@ -1,7 +1,10 @@
++from .units import WeightError, kg_to_g, normalize_kg
++
+ MAX_TOTAL_G = 2**31 - 1  # the carrier system stores grams in a signed 32-bit column
+ 
+ 
+-def check_total_g(grams):
+-    if grams > MAX_TOTAL_G:
+-        raise OverflowError("total weight exceeds the carrier limit")
+-    return grams
++def check_total_kg(weight_kg):
++    weight = normalize_kg(weight_kg)
++    if kg_to_g(weight) > MAX_TOTAL_G:
++        raise WeightError("total weight exceeds the carrier limit")
++    return weight
+diff --git a/shipcalc/models.py b/shipcalc/models.py
+index 99eb161..aabc9c7 100644
+--- a/shipcalc/models.py
++++ b/shipcalc/models.py
+@@ -1,4 +1,4 @@
+-from .units import to_grams
++from .units import g_to_kg, kg_to_g, normalize_kg
+ 
+ 
+ class Item:
+@@ -6,26 +6,26 @@ class Item:
+ 
+     Fields (validate_item reads this table, keep it in sync):
+         sku: str, 1..32
+-        weight_g: int, 1..1000000
++        weight_kg: kg, 0.001..1000.000
+         qty: int, 1..1000
+     """
+ 
+-    def __init__(self, sku, weight_g, qty=1):
++    def __init__(self, sku, weight_kg, qty=1):
+         if isinstance(qty, bool) or not isinstance(qty, int) or qty < 1:
+             raise ValueError(f"invalid quantity: {qty!r}")
+         self.sku = sku
+-        self.weight_g = to_grams(weight_g)
++        self.weight_kg = normalize_kg(weight_kg)
+         self.qty = qty
+ 
+-    def line_weight_g(self):
+-        return self.weight_g * self.qty
++    def line_weight_kg(self):
++        return g_to_kg(kg_to_g(self.weight_kg) * self.qty)
+ 
+     def to_dict(self):
+-        return {"sku": self.sku, "weight_g": self.weight_g, "qty": self.qty}
++        return {"sku": self.sku, "weight_kg": self.weight_kg, "qty": self.qty}
+ 
+     @classmethod
+     def from_dict(cls, data):
+-        return cls(data["sku"], data["weight_g"], data.get("qty", 1))
++        return cls(data["sku"], data["weight_kg"], data.get("qty", 1))
+ 
+ 
+ class Order:
+diff --git a/shipcalc/packing.py b/shipcalc/packing.py
+index 6de3226..fc60d85 100644
+--- a/shipcalc/packing.py
++++ b/shipcalc/packing.py
+@@ -1,28 +1,34 @@
+-MAX_PARCEL_G = 20000
++from .units import g_to_kg, kg_to_g, normalize_kg
++
++MAX_PARCEL_KG = "20.000"
+ 
+ 
+ class Parcel:
+-    def __init__(self, weight_g, skus):
+-        self.weight_g = weight_g
++    def __init__(self, weight_kg, skus):
++        self.weight_kg = normalize_kg(weight_kg)
+         self.skus = list(skus)
+ 
+-    def add(self, weight_g, sku):
+-        self.weight_g += weight_g
++    def add(self, weight_kg, sku):
++        self.weight_kg = g_to_kg(kg_to_g(self.weight_kg) + kg_to_g(weight_kg))
+         self.skus.append(sku)
+ 
+ 
+ def split_parcels(order):
+-    """First-fit decreasing. A unit heavier than the limit travels alone."""
++    """First-fit decreasing. A unit heavier than the limit travels alone.
++
++    Compared in whole grams, which is exact for weights with three decimals.
++    """
++    limit = kg_to_g(MAX_PARCEL_KG)
+     units = []
+     for item in order.items:
+-        units.extend((item.weight_g, item.sku) for _ in range(item.qty))
++        units.extend((kg_to_g(item.weight_kg), item.sku) for _ in range(item.qty))
+     units.sort(key=lambda unit: (-unit[0], unit[1]))
+     parcels = []
+     for grams, sku in units:
+         for parcel in parcels:
+-            if parcel.weight_g + grams <= MAX_PARCEL_G:
+-                parcel.add(grams, sku)
++            if kg_to_g(parcel.weight_kg) + grams <= limit:
++                parcel.add(g_to_kg(grams), sku)
+                 break
+         else:
+-            parcels.append(Parcel(grams, [sku]))
++            parcels.append(Parcel(g_to_kg(grams), [sku]))
+     return parcels
+diff --git a/shipcalc/rates.py b/shipcalc/rates.py
+index 99251c7..7b9218e 100644
+--- a/shipcalc/rates.py
++++ b/shipcalc/rates.py
+@@ -1,16 +1,19 @@
++from .units import kg_to_g
++
+ ZONES = {"eu": (400, 90), "us": (900, 150), "world": (1500, 260)}  # (base cents, cents per extra step)
+-STEP_G = 500
+-HEAVY_G = 10000
++STEP_KG = "0.500"
++HEAVY_KG = "10.000"
+ HEAVY_SURCHARGE = 500
+ 
+ 
+-def shipping_cents(weight_g, zone):
++def shipping_cents(weight_kg, zone):
+     try:
+         base, per_step = ZONES[zone]
+     except KeyError:
+         raise ValueError(f"unknown zone: {zone!r}") from None
+-    steps = max(1, -(-weight_g // STEP_G))
++    grams = kg_to_g(weight_kg)
++    steps = max(1, -(-grams // kg_to_g(STEP_KG)))
+     cents = base + per_step * (steps - 1)
+-    if weight_g > HEAVY_G:
++    if grams > kg_to_g(HEAVY_KG):
+         cents += HEAVY_SURCHARGE
+     return cents
+diff --git a/shipcalc/reports.py b/shipcalc/reports.py
+index e0ac2d3..9e4a0d3 100644
+--- a/shipcalc/reports.py
++++ b/shipcalc/reports.py
+@@ -1,24 +1,34 @@
+-LIGHT_G = 500
+-MEDIUM_G = 2000
++from .units import g_to_kg, kg_to_g
+ 
++LIGHT_KG = "0.500"
++MEDIUM_KG = "2.000"
+ 
+-def average_weight_g(order):
++
++def average_weight_kg(order):
+     units = sum(item.qty for item in order.items)
+     if units == 0:
+-        return 0
+-    return sum(item.line_weight_g() for item in order.items) // units
++        return "0.000"
++    total_g = sum(kg_to_g(item.line_weight_kg()) for item in order.items)
++    # The average in grams is the average in kg times 1000, so rounding it to a
++    # whole gram is rounding it to three kg places. Ties go to even.
++    quotient, remainder = divmod(total_g, units)
++    if 2 * remainder > units or (2 * remainder == units and quotient % 2 == 1):
++        quotient += 1
++    return g_to_kg(quotient)
+ 
+ 
+ def heaviest(order, n=3):
+-    return sorted(order.items, key=lambda item: (-item.weight_g, item.sku))[:n]
++    return sorted(order.items, key=lambda item: (-kg_to_g(item.weight_kg), item.sku))[:n]
+ 
+ 
+ def weight_bands(order):
++    light, medium = kg_to_g(LIGHT_KG), kg_to_g(MEDIUM_KG)
+     bands = {"light": 0, "medium": 0, "heavy": 0}
+     for item in order.items:
+-        if item.weight_g <= LIGHT_G:
++        grams = kg_to_g(item.weight_kg)
++        if grams <= light:
+             bands["light"] += item.qty
+-        elif item.weight_g <= MEDIUM_G:
++        elif grams <= medium:
+             bands["medium"] += item.qty
+         else:
+             bands["heavy"] += item.qty
+diff --git a/shipcalc/storage.py b/shipcalc/storage.py
+index c1dbbb9..4e98a73 100644
+--- a/shipcalc/storage.py
++++ b/shipcalc/storage.py
+@@ -1,18 +1,27 @@
+ import json
+ 
+ from .models import Item, Order
++from .units import g_to_kg
+ 
+ 
+ def save(order, path):
+-    data = {"schema": 1, "items": [item.to_dict() for item in order.items]}
++    data = {"schema": 2, "items": [item.to_dict() for item in order.items]}
+     with open(path, "w", encoding="utf-8") as handle:
+         json.dump(data, handle, indent=2, sort_keys=True)
+         handle.write("\n")
+ 
+ 
++def _item_from_schema1(raw):
++    return Item(raw["sku"], g_to_kg(raw["weight_g"]), raw.get("qty", 1))
++
++
+ def load(path):
+     with open(path, encoding="utf-8") as handle:
+         data = json.load(handle)
+-    if data.get("schema") != 1:
+-        raise ValueError(f"unsupported schema: {data.get('schema')!r}")
++    schema = data.get("schema")
++    # type check: True == 1 in Python, so a plain comparison would accept a bool.
++    if type(schema) is not int or schema not in (1, 2):
++        raise ValueError(f"unsupported schema: {schema!r}")
++    if schema == 1:
++        return Order(_item_from_schema1(raw) for raw in data["items"])
+     return Order(Item.from_dict(raw) for raw in data["items"])
+diff --git a/shipcalc/units.py b/shipcalc/units.py
+index f69aa94..1208ff2 100644
+--- a/shipcalc/units.py
++++ b/shipcalc/units.py
+@@ -1,8 +1,41 @@
+-"""Weight helpers. Weights are whole grams (int) everywhere in the package."""
++"""Weight helpers. Weights are canonical kilogram strings ("0.250") everywhere in the package.
+ 
++See docs/MIGRATION.md. Whole grams appear only in the conversions kg_to_g and g_to_kg.
++"""
++import re
++from decimal import ROUND_HALF_EVEN, Decimal, localcontext
+ 
+-def to_grams(value):
+-    """Return value if it is a valid weight in grams, else raise ValueError."""
+-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+-        raise ValueError(f"invalid weight: {value!r}")
+-    return value
++
++class WeightError(ValueError):
++    """Invalid weight input, or a total over the carrier limit."""
++
++
++_ACCEPTED = re.compile(r"[0-9]+(?:\.[0-9]+)?")
++_MILLI = Decimal("0.001")
++
++
++def normalize_kg(value):
++    """Return value as a canonical kg string, rounding to three places half to even.
++
++    Raises WeightError for anything that is not a str of digits with an optional point.
++    """
++    if not isinstance(value, str) or _ACCEPTED.fullmatch(value) is None:
++        raise WeightError(f"invalid weight: {value!r}")
++    with localcontext() as ctx:
++        ctx.prec = len(value) + 10  # enough digits that quantize never overflows
++        rounded = Decimal(value).quantize(_MILLI, rounding=ROUND_HALF_EVEN)
++    return f"{rounded:f}"
++
++
++def kg_to_g(value):
++    """Return the exact whole number of grams in value (a whole number of grams)."""
++    whole, _, fraction = normalize_kg(value).partition(".")
++    return int(whole) * 1000 + int(fraction)
++
++
++def g_to_kg(grams):
++    """Return a non-negative whole number of grams as a canonical kg string."""
++    if isinstance(grams, bool) or not isinstance(grams, int) or grams < 0:
++        raise WeightError(f"invalid weight: {grams!r}")
++    digits = str(grams).rjust(4, "0")
++    return f"{digits[:-3]}.{digits[-3:]}"
+diff --git a/shipcalc/validate.py b/shipcalc/validate.py
+index 59426aa..ce6eefd 100644
+--- a/shipcalc/validate.py
++++ b/shipcalc/validate.py
+@@ -2,8 +2,9 @@
+ import re
+ 
+ from .models import Item
++from .units import WeightError, kg_to_g, normalize_kg
+ 
+-_LINE = re.compile(r"^\s+(\w+): (str|int), (\d+)\.\.(\d+)\s*$")
++_LINE = re.compile(r"^\s+(\w+): (str|int|kg), (\d+(?:\.\d+)?)\.\.(\d+(?:\.\d+)?)\s*$")
+ 
+ 
+ def _parse(doc):
+@@ -12,7 +13,10 @@ def _parse(doc):
+         match = _LINE.match(line)
+         if match:
+             name, kind, low, high = match.groups()
+-            rules[name] = (kind, int(low), int(high))
++            if kind == "kg":
++                rules[name] = (kind, normalize_kg(low), normalize_kg(high))
++            else:
++                rules[name] = (kind, int(low), int(high))
+     return rules
+ 
+ 
+@@ -32,6 +36,14 @@ def validate_item(data):
+                 problems.append(f"{name}: not a string")
+             elif not low <= len(value) <= high:
+                 problems.append(f"{name}: length out of range {low}..{high}")
++        elif kind == "kg":
++            try:
++                grams = kg_to_g(value)  # rounds first, so the range applies after rounding
++            except WeightError:
++                problems.append(f"{name}: invalid weight: {value!r}")
++            else:
++                if not kg_to_g(low) <= grams <= kg_to_g(high):
++                    problems.append(f"{name}: out of range {low}..{high}")
+         elif isinstance(value, bool) or not isinstance(value, int):
+             problems.append(f"{name}: not an integer")
+         elif not low <= value <= high:
+diff --git a/tests/test_migration.py b/tests/test_migration.py
+new file mode 100644
+index 0000000..423f6c7
+--- /dev/null
++++ b/tests/test_migration.py
+@@ -0,0 +1,241 @@
++import json
++import os
++import tempfile
++import unittest
++
++from shipcalc import cache, cli, export, format as fmt, limits, reports, storage, units, validate
++from shipcalc.calc import order_weight_kg, quote
++from shipcalc.models import Item, Order
++from shipcalc.packing import split_parcels
++from shipcalc.units import WeightError
++
++
++class UnitsTest(unittest.TestCase):
++    def test_normalize_pads_and_rounds_half_to_even(self):
++        self.assertEqual(units.normalize_kg("2"), "2.000")
++        self.assertEqual(units.normalize_kg("0.250"), "0.250")
++        self.assertEqual(units.normalize_kg("1.0005"), "1.000")
++        self.assertEqual(units.normalize_kg("1.0015"), "1.002")
++        self.assertEqual(units.normalize_kg("2.0025"), "2.002")
++        self.assertEqual(units.normalize_kg("0.0004"), "0.000")
++
++    def test_normalize_accepts_long_input(self):
++        self.assertEqual(units.normalize_kg("1" * 40 + ".5"), "1" * 40 + ".500")
++
++    def test_invalid_input_raises_weight_error_with_message(self):
++        bad = ["-1", "+1", "1e3", "nan", "inf", "", " 1", "1 ", "1,5", "1.", ".5", ".", "1_000"]
++        for value in bad:
++            with self.subTest(value=value), self.assertRaises(WeightError) as ctx:
++                units.normalize_kg(value)
++            self.assertEqual(str(ctx.exception), f"invalid weight: {value!r}")
++        for value in [1, 1.5, True, None]:
++            with self.subTest(value=value), self.assertRaises(WeightError):
++                units.normalize_kg(value)
++
++    def test_weight_error_is_value_error(self):
++        self.assertTrue(issubclass(WeightError, ValueError))
++
++    def test_trailing_newline_is_invalid(self):
++        with self.assertRaises(WeightError):
++            units.normalize_kg("1.5\n")
++
++    def test_kg_to_g_and_g_to_kg(self):
++        self.assertEqual(units.kg_to_g("1.25"), 1250)
++        self.assertEqual(units.kg_to_g("0.000"), 0)
++        self.assertEqual(units.g_to_kg(1250), "1.250")
++        self.assertEqual(units.g_to_kg(5), "0.005")
++        self.assertEqual(units.g_to_kg(0), "0.000")
++        for bad in [-1, True, 1.5, "1", None]:
++            with self.subTest(value=bad), self.assertRaises(WeightError):
++                units.g_to_kg(bad)
++
++
++class ModelsTest(unittest.TestCase):
++    def test_weight_is_normalised(self):
++        self.assertEqual(Item("A", "1000").weight_kg, "1000.000")
++
++    def test_line_weight_is_canonical(self):
++        self.assertEqual(Item("A", "0.5", 3).line_weight_kg(), "1.500")
++
++
++class CalcTest(unittest.TestCase):
++    def test_carrier_limit_boundary(self):
++        self.assertEqual(limits.check_total_kg("2147483.647"), "2147483.647")
++        with self.assertRaises(WeightError):
++            limits.check_total_kg("2147483.648")
++        order = Order([Item("A", "2147483.647"), Item("B", "0.001")])
++        with self.assertRaises(WeightError):
++            order_weight_kg(order)
++
++    def test_quote_has_weight_kg_and_is_otherwise_unchanged(self):
++        result = quote(Order([Item("A", "0.5")]), "eu")
++        self.assertEqual(set(result), {"parcels", "weight_kg", "cents"})
++        self.assertEqual(result["weight_kg"], "0.500")
++
++
++class PackingTest(unittest.TestCase):
++    def test_parcels_store_canonical_kg(self):
++        parcels = split_parcels(Order([Item("A", "12.000"), Item("B", "9.000")]))
++        self.assertEqual([p.weight_kg for p in parcels], ["12.000", "9.000"])
++
++    def test_unit_exactly_at_limit_fits(self):
++        parcels = split_parcels(Order([Item("A", "20.000"), Item("B", "0.001")]))
++        self.assertEqual(len(parcels), 2)
++
++    def test_unit_over_limit_travels_alone(self):
++        parcels = split_parcels(Order([Item("A", "25.000")]))
++        self.assertEqual([p.weight_kg for p in parcels], ["25.000"])
++
++
++class ReportsTest(unittest.TestCase):
++    def test_average_rounds_half_to_even(self):
++        # total 0.003 kg over 2 units: 1.5 g, ties to even -> 2 g
++        self.assertEqual(reports.average_weight_kg(Order([Item("A", "0.001"), Item("B", "0.002")])), "0.002")
++        # total 0.001 kg over 2 units: 0.5 g, ties to even -> 0 g
++        self.assertEqual(reports.average_weight_kg(Order([Item("A", "0.001"), Item("B", "0.000")])), "0.000")
++        # total 0.002 kg over 2 units: exactly 1 g
++        self.assertEqual(reports.average_weight_kg(Order([Item("A", "0.001", 2)])), "0.001")
++
++    def test_average_of_empty_order(self):
++        self.assertEqual(reports.average_weight_kg(Order()), "0.000")
++
++    def test_average_not_integer_division(self):
++        self.assertEqual(reports.average_weight_kg(Order([Item("A", "0.001"), Item("B", "0.002")])), "0.002")
++        self.assertEqual(reports.average_weight_kg(Order([Item("A", "1.000"), Item("B", "0.002")])), "0.501")
++
++    def test_heaviest_is_numeric_and_ties_by_sku(self):
++        order = Order([Item("B", "9.000"), Item("A", "10.000"), Item("C", "9.000"), Item("D", "0.500")])
++        self.assertEqual([i.sku for i in reports.heaviest(order)], ["A", "B", "C"])
++
++    def test_weight_bands_thresholds(self):
++        order = Order([
++            Item("L", "0.500", 1), Item("M", "0.501", 2), Item("M2", "2.000", 1), Item("H", "2.001", 3),
++        ])
++        self.assertEqual(reports.weight_bands(order), {"light": 1, "medium": 3, "heavy": 3})
++
++
++class FormatTest(unittest.TestCase):
++    def test_format_weight(self):
++        self.assertEqual(fmt.format_weight("0.250"), "0.250 kg")
++        self.assertEqual(fmt.format_weight("12.000"), "12.000 kg")
++
++    def test_format_table_layout(self):
++        table = fmt.format_table(Order([Item("MUG-01", "0.350", 2)]))
++        self.assertEqual(table, "MUG-01" + " " * 10 + "0.350 kg  x2")
++
++
++class ExportTest(unittest.TestCase):
++    def test_csv_stays_in_grams_as_integers(self):
++        order = Order([Item("MUG-01", "0.350", 2), Item("BOOK-07", "1.200")])
++        self.assertEqual(export.to_csv(order), "sku,weight_g,qty\nMUG-01,350,2\nBOOK-07,1200,1\n")
++
++    def test_carrier_payload_is_int_grams(self):
++        payload = export.carrier_payload(Order([Item("A", "1.250", 2)]))
++        self.assertEqual(payload, {"weight_g": 2500, "parcels": 1})
++        self.assertIs(type(payload["weight_g"]), int)
++
++
++class CacheTest(unittest.TestCase):
++    def test_quote_key_is_v2_kg(self):
++        order = Order([Item("A", "1.5"), Item("B", "2")])
++        self.assertEqual(cache.quote_key(order, "eu"), "quote:v2:eu:3.500:2")
++
++
++class StorageTest(unittest.TestCase):
++    def setUp(self):
++        self._dir = tempfile.TemporaryDirectory()
++        self.path = os.path.join(self._dir.name, "order.json")
++
++    def tearDown(self):
++        self._dir.cleanup()
++
++    def _write(self, data):
++        with open(self.path, "w", encoding="utf-8") as handle:
++            json.dump(data, handle)
++
++    def test_schema1_loads_grams_exactly(self):
++        self._write({"schema": 1, "items": [{"sku": "A", "weight_g": 1250, "qty": 2}]})
++        order = storage.load(self.path)
++        self.assertEqual(order.items[0].weight_kg, "1.250")
++        self.assertEqual(order.items[0].qty, 2)
++
++    def test_schema1_invalid_grams_raise(self):
++        for bad in [-5, "350", True, 1.5]:
++            with self.subTest(value=bad):
++                self._write({"schema": 1, "items": [{"sku": "A", "weight_g": bad}]})
++                with self.assertRaises(WeightError):
++                    storage.load(self.path)
++
++    def test_schema2_is_normalised_on_load(self):
++        self._write({"schema": 2, "items": [{"sku": "A", "weight_kg": "1.5", "qty": 1}]})
++        self.assertEqual(storage.load(self.path).items[0].weight_kg, "1.500")
++
++    def test_schema2_invalid_weight_raises(self):
++        self._write({"schema": 2, "items": [{"sku": "A", "weight_kg": "1,5", "qty": 1}]})
++        with self.assertRaises(WeightError):
++            storage.load(self.path)
++
++    def test_unknown_schema_raises_value_error(self):
++        for bad in [3, True, "2", None]:
++            with self.subTest(schema=bad):
++                self._write({"schema": bad, "items": []})
++                with self.assertRaises(ValueError):
++                    storage.load(self.path)
++
++    def test_save_writes_schema2(self):
++        storage.save(Order([Item("A", "0.250")]), self.path)
++        with open(self.path, encoding="utf-8") as handle:
++            data = json.load(handle)
++        self.assertEqual(data["schema"], 2)
++        self.assertEqual(data["items"], [{"sku": "A", "weight_kg": "0.250", "qty": 1}])
++
++
++class ValidateTest(unittest.TestCase):
++    def _item(self, weight):
++        return {"sku": "A", "weight_kg": weight, "qty": 1}
++
++    def test_weight_range_applies_after_rounding(self):
++        self.assertIn("weight_kg: out of range 0.001..1000.000", validate.validate_item(self._item("0.0004")))
++        self.assertEqual(validate.validate_item(self._item("1000.0004")), [])
++        self.assertEqual(validate.validate_item(self._item("0.001")), [])
++
++    def test_invalid_weight_is_a_problem(self):
++        problems = validate.validate_item(self._item("1,5"))
++        self.assertEqual(problems, ["weight_kg: invalid weight: '1,5'"])
++
++    def test_weight_g_only_is_missing_weight_kg(self):
++        problems = validate.validate_item({"sku": "A", "weight_g": 1, "qty": 1})
++        self.assertIn("weight_kg: missing", problems)
++
++
++class CliTest(unittest.TestCase):
++    def setUp(self):
++        self._dir = tempfile.TemporaryDirectory()
++        self.path = os.path.join(self._dir.name, "order.json")
++
++    def tearDown(self):
++        self._dir.cleanup()
++
++    def test_add_rejects_invalid_weight_with_status_2(self):
++        storage.save(Order(), self.path)
++        import io
++        import contextlib
++        err = io.StringIO()
++        with contextlib.redirect_stderr(err):
++            status = cli.main(["add", self.path, "A", "1,5", "1"])
++        self.assertEqual(status, 2)
++        self.assertEqual(err.getvalue(), "error: invalid weight: '1,5'\n")
++
++    def test_add_then_quote_in_kg(self):
++        storage.save(Order(), self.path)
++        import io
++        import contextlib
++        self.assertEqual(cli.main(["add", self.path, "A", "0.350", "2"]), 0)
++        out = io.StringIO()
++        with contextlib.redirect_stdout(out):
++            self.assertEqual(cli.main(["quote", self.path, "--zone", "eu"]), 0)
++        self.assertIn("total weight: 0.700 kg", out.getvalue())
++
++
++if __name__ == "__main__":
++    unittest.main()

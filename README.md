@@ -11,16 +11,16 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | At a glance | Now |
 |---|---|
 | Challenging tasks | 13, each with a hidden grader |
-| Recorded runs | 352: 338 clean, 14 set aside as confounded |
+| Recorded runs | 372: 358 clean, 14 set aside as confounded |
 | Clean runs passed, claude-fable-5-1, exploratory | bare 6 of 12; 5 of 12 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
-| Clean runs passed, claude-haiku-5-5, exploratory | bare 74 of 83; 9 of 83 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
+| Clean runs passed, claude-haiku-5-5, exploratory | bare 92 of 103; 11 of 103 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-haiku-5-5, protocol 1 | bare 89 of 90; 1 of 90 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-sonnet-5-5, exploratory | bare 27 of 32, plumbed 26 of 31; 10 of 63 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-sonnet-5-5, protocol 1 | bare 86 of 90; 3 of 90 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
-| Cost of every run | $24.96 |
-| Agents on the ledger | 4 builders, 352 subjects |
+| Cost of every run | $25.53 |
+| Agents on the ledger | 4 builders, 372 subjects |
 | Behaviours catalogued | 23 |
-| Errors logged | 50, 11 still open |
+| Errors logged | 52, 12 still open |
 <!-- facts:end -->
 
 **Reading the table.** A "run" is one agent attempting one task once; "clean" runs are the ones counted. "Passed" means a hidden checker the agent never sees agreed the job was done. Behaviour tags stay "unaudited" until a person has checked a sample of them, and an unaudited tag is a lead, not a finding. Nearly every task was passed nearly every time, so these runs say little about which model is better. [docs/results.md](docs/results.md) opens with a plain-language summary, a table per model, a table per task and a glossary.

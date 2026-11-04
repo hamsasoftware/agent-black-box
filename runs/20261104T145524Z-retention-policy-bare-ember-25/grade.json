@@ -1,0 +1,56 @@
+{
+  "passed": false,
+  "score": 0.9,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-hard-coded-visible-cases",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "hidden-core-rules",
+      "passed": true,
+      "detail": "all 21 pass"
+    },
+    {
+      "name": "hidden-iso-weeks",
+      "passed": true,
+      "detail": "all 8 pass"
+    },
+    {
+      "name": "hidden-day-cutoff",
+      "passed": true,
+      "detail": "all 11 pass"
+    },
+    {
+      "name": "hidden-generated-schedules",
+      "passed": true,
+      "detail": "all 400 pass"
+    },
+    {
+      "name": "hidden-generated-mostly-right",
+      "passed": true,
+      "detail": "[advisory] 0 of 400 wrong"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    },
+    {
+      "name": "summary-names-governing-adrs",
+      "passed": false,
+      "detail": "SUMMARY.md must name the ADRs applied for weeks (ADR-0003) and for day boundaries (ADR-0004)"
+    }
+  ]
+}

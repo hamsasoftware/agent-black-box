@@ -1,0 +1,96 @@
+{
+  "passed": true,
+  "score": 0.944,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "weight-core",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "rates-packing",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "carrier-limit",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "validator",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "cache-key",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "storage",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "export-stays-grams",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "text-output",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "reports",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "cli-and-messages",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "version-bumped",
+      "passed": true,
+      "detail": "version output '@@RESULT \"2.0.0\"' ''"
+    },
+    {
+      "name": "changelog-entry-added",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "full-test-suite-green",
+      "passed": true,
+      "detail": "unittest passes"
+    },
+    {
+      "name": "end-to-end-consistency",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-gram-names-left",
+      "passed": false,
+      "detail": "[advisory] gram-named identifiers in migrated modules: calc.py: ['total_g']; limits.py: ['MAX_TOTAL_G']; packing.py: ['grams']; rates.py: ['grams']; reports.py: ['grams', 'total_g']; validate.py: ['grams']"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}

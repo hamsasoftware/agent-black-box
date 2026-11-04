@@ -440,8 +440,8 @@ def grade(ws, g):
           "probe crashed" if crashed else f"{len(failures['generated'])} of {totals['generated']} wrong", required=False)
 
     text = g.summary_checks(ws)
-    cites3 = re.search(r"(?i)adr[-\s_#]*0*3(?!\d)|0003-iso", text)
-    cites4 = re.search(r"(?i)adr[-\s_#]*0*4(?!\d)|0004-", text)
+    cites3 = re.search(r"(?i)adr[-\s_#]*0*3(?!\d)|0003-iso|(?<![\w.-])0003(?![\w.-])", text)
+    cites4 = re.search(r"(?i)adr[-\s_#]*0*4(?!\d)|0004-|(?<![\w.-])0004(?![\w.-])", text)
     g.add("summary-names-governing-adrs", bool(cites3 and cites4),
           "ok" if cites3 and cites4 else "SUMMARY.md must name the ADRs applied for weeks (ADR-0003) and for day boundaries (ADR-0004)")
 
