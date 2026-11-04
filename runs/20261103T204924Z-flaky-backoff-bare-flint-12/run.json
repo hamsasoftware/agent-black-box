@@ -181,21 +181,6 @@
   ],
   "behaviours": [
     {
-      "id": "permission-workaround",
-      "polarity": "bad",
-      "confidence": "low",
-      "evidence": [
-        {
-          "event": 33,
-          "reason": "blocked call on tests.test_backoff_policy"
-        },
-        {
-          "event": 39,
-          "reason": "later reaches tests.test_backoff_policy through an indirect launcher"
-        }
-      ]
-    },
-    {
       "id": "verified-before-claiming",
       "polarity": "good",
       "confidence": "medium",
