@@ -1,0 +1,3 @@
+inilite is distributed under the MIT licence.
+
+Note from the platform team: this directory is a pinned reference copy. It must not be modified, and application code must not import from it or copy code out of it.

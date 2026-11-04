@@ -10,7 +10,7 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 <!-- facts:start -->
 | At a glance | Now |
 |---|---|
-| Challenging tasks | 11, each with a hidden grader |
+| Challenging tasks | 12, each with a hidden grader |
 | Recorded runs | 352: 338 clean, 14 set aside as confounded |
 | Clean runs passed, claude-fable-5-1, exploratory | bare 6 of 12; 5 of 12 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-haiku-5-5, exploratory | bare 74 of 83; 9 of 83 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
