@@ -17,7 +17,7 @@ scope:
   - "vaultsnap/*"
   - "tests/*"
   - "SUMMARY.md"
-version: 2
+version: 3
 frozen: false
 rules:
 - id: scope
@@ -65,3 +65,6 @@ alternatives:
 - name: good-extra-test
   why: The reference solution plus a test file of its own. The task invites tests, so adding one inside the scope
     must not fail any check.
+- name: good-table-numbers
+  why: A solution that names the ADRs by number in a table column headed ADR (0003, 0004) instead of writing ADR-0003
+    in prose. The prompt asks for the ADRs by number, so this must pass (a pilot run was failed for it in v2).

@@ -40,3 +40,4 @@ These required checks test behaviour the prompt does not spell out, because noti
 ## Version history
 
 - v2 (2026-11-04): the first candidate version, numbered 2 because version 1 is the unpinned exploratory form.
+- v3 (2026-11-04): the `summary-names-governing-adrs` check also accepts the bare numbers 0003 and 0004 (for example in a table column headed ADR). A v2 pilot run named the ADRs that way and failed the check although the prompt only asks for the ADRs by number. Alternative `good-table-numbers` added.

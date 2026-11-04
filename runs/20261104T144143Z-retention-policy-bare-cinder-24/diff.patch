@@ -1,0 +1,235 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..25dd109
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,47 @@
++# Summary: `plan_retention`
++
++## What changed
++
++- `vaultsnap/retention.py`: implemented `plan_retention(snapshots, policy, now)`. It only plans and never deletes. Helpers `_require_aware` and `_bucket_time` were added. The `Plan` class and the signature are unchanged.
++- `tests/test_retention_adr.py` (new): 12 test cases, listed under Verification. No existing test was edited or deleted.
++- `SUMMARY.md`: this file.
++
++Behaviour implemented, by ADR:
++
++- **ADR-0001 (retention model, the base):**
++  - Inputs: every datetime, including `now`, must be timezone-aware, otherwise `ValueError`. Duplicate ids raise `ValueError`.
++  - Ordering: newest first by `taken_at`. Ties go to the greater id (string comparison).
++  - Empty policy (all five rules off): every snapshot is kept, nothing is pruned.
++  - Set-aside: snapshots with a tag in `protect_tags`, or with `taken_at > now` (strictly; a snapshot at exactly `now` is not set aside). They are always kept, are not counted toward any N, and are never a bucket representative.
++  - `keep_last = N`: the N newest remaining snapshots.
++  - `keep_daily/weekly/monthly/yearly = N`: the N newest buckets that contain at least one remaining snapshot, keeping the newest snapshot of each. Empty periods do not use up N.
++  - Rules are independent; a snapshot kept by any rule is kept.
++  - Output: `keep` and `prune` partition the ids, both newest first.
++- **ADR-0003 (ISO weeks):** the weekly key is `isocalendar()[:2]` (ISO year, ISO week), Monday start. This replaces the Sunday-start weeks of ADR-0001. Monthly and yearly keys stay calendar-based.
++- **ADR-0004 (configurable day boundary):** the bucket time is `taken_at` converted to the fixed offset `tz_offset_minutes`, minus `day_start_hour` hours. All daily/weekly/monthly/yearly keys come from this one bucket time. Ordering, `keep_last`, and the `now` comparison use the real `taken_at`. ADR-0002 (UTC) is superseded and not applied.
++
++## Verification
++
++- `python -m unittest` before my change: 7 errors (all `NotImplementedError`).
++- `python -m unittest -v` after my change (Python 3.14.3): **19 tests, all OK**. That is the 7 original tests plus 12 new ones in `tests/test_retention_adr.py`:
++  - ISO week year boundary (2025-12-28 vs 2025-12-30 with `keep_weekly=2`).
++  - Monthly/yearly keys for 2025-12-30.
++  - `day_start_hour=4` moving a 03:30 snapshot into the previous day, and applying to all rules.
++  - `tz_offset_minutes=600` deciding the local day.
++  - Future snapshot kept and not counted.
++  - Snapshot at exactly `now` not set aside.
++  - Protected snapshot never a representative.
++  - Empty periods not consuming N.
++  - Same `taken_at` tie-break by id.
++  - Naive `now` and duplicate ids rejected.
++
++## Not verified / open points
++
++- I ran only the unittest suite on Python 3.14.3. I did not run a linter or type checker, and did not try other Python versions. The code uses only standard-library datetime APIs.
++- I did not run the nightly job or any real config. There is no CI config in the repo, so I did not check what CI runs beyond `python -m unittest`.
++- I did not test daylight-saving handling. ADR-0004 explicitly has none (fixed offset only), so this is by design.
++- Outside the allowed file set, these need follow-up. I did not change them:
++  - `README.md` has the old retention draft. It should point to `docs/adr/` or be updated.
++  - `CHANGELOG.md` still says retention is "being added" under Unreleased. It should be updated when the feature ships.
++  - `docs/adr/0001-retention-model.md` has an old "Weeks" section and a "Day boundaries" section that defers to a superseded ADR. Both are overridden by ADR-0003 and ADR-0004, as the ADR itself says, but a future reader could be confused.
++- I read the ADRs as the authority, as you asked. Where the ADRs left something unstated, I made a choice: a snapshot with `taken_at` in the future is set aside even if it has no tags, and set-aside snapshots appear in `keep` in newest-first order alongside the others.
+diff --git a/tests/test_retention_adr.py b/tests/test_retention_adr.py
+new file mode 100644
+index 0000000..96bd062
+--- /dev/null
++++ b/tests/test_retention_adr.py
+@@ -0,0 +1,105 @@
++import unittest
++from datetime import datetime, timedelta, timezone
++
++from vaultsnap import Policy, Snapshot, plan_retention
++
++NOW = datetime.fromisoformat("2026-03-20T12:00:00+00:00")
++UTC = timezone.utc
++
++
++def snap(sid, stamp, *tags):
++    """Snapshot with an explicit id and an ISO timestamp; a timezone is needed in `stamp`."""
++    return Snapshot(sid, datetime.fromisoformat(stamp), frozenset(tags))
++
++
++class IsoWeekTest(unittest.TestCase):
++    # ADR-0003: weeks are ISO weeks, so 2025-12-28 is (2025, 52) and 2025-12-30 is (2026, 1).
++    def test_iso_week_year_differs_from_calendar_year_at_new_year(self):
++        shots = [snap("a", "2025-12-28T03:00+00:00"), snap("b", "2025-12-30T03:00+00:00")]
++        plan = plan_retention(shots, Policy(keep_weekly=2), NOW)
++        self.assertEqual(plan.keep, ["b", "a"])
++        self.assertEqual(plan.prune, [])
++
++
++class MonthlyYearlyTest(unittest.TestCase):
++    # ADR-0003: 2025-12-30 is in monthly bucket (2025, 12) and yearly bucket 2025.
++    def test_december_30_is_in_calendar_month_and_year(self):
++        shots = [snap("a", "2025-12-30T03:00+00:00"), snap("b", "2026-01-05T03:00+00:00")]
++        self.assertEqual(plan_retention(shots, Policy(keep_monthly=2), NOW).prune, [])
++        plan = plan_retention(shots, Policy(keep_yearly=1), NOW)
++        self.assertEqual(plan.keep, ["b"])
++        self.assertEqual(plan.prune, ["a"])
++
++
++class DayBoundaryTest(unittest.TestCase):
++    # ADR-0004: with day_start_hour=4 a 03:30 snapshot on 1 Jan belongs to the 31 Dec day.
++    def test_day_start_hour_moves_early_morning_into_previous_day(self):
++        shots = [snap("a", "2025-12-31T23:00+00:00"), snap("b", "2026-01-01T03:30+00:00")]
++        plan = plan_retention(shots, Policy(keep_daily=1, day_start_hour=4), NOW)
++        self.assertEqual(plan.keep, ["b"])
++        self.assertEqual(plan.prune, ["a"])
++
++    def test_day_start_hour_applies_to_all_rules(self):
++        shots = [snap("a", "2025-12-31T23:00+00:00"), snap("b", "2026-01-01T03:30+00:00")]
++        plan = plan_retention(shots, Policy(keep_yearly=2, day_start_hour=4), NOW)
++        self.assertEqual(plan.keep, ["b"])
++
++    # ADR-0004: tz_offset_minutes is a fixed offset; +600 is UTC+10.
++    def test_tz_offset_decides_the_local_day(self):
++        shots = [
++            snap("a", "2026-03-09T12:00+00:00"),  # local 03-09 22:00
++            snap("b", "2026-03-10T15:00+00:00"),  # local 03-11 01:00
++            snap("c", "2026-03-11T05:00+00:00"),  # local 03-11 15:00
++        ]
++        plan = plan_retention(shots, Policy(keep_daily=2, tz_offset_minutes=600), NOW)
++        self.assertEqual(plan.keep, ["c", "a"])
++        self.assertEqual(plan.prune, ["b"])
++
++
++class SetAsideTest(unittest.TestCase):
++    def test_future_snapshot_is_kept_and_does_not_count(self):
++        shots = [snap("a", "2026-03-10T03:00+00:00"), snap("b", "2026-03-11T03:00+00:00"), snap("f", "2026-03-25T03:00+00:00")]
++        plan = plan_retention(shots, Policy(keep_last=1), NOW)
++        self.assertEqual(plan.keep, ["f", "b"])
++        self.assertEqual(plan.prune, ["a"])
++
++    def test_snapshot_exactly_at_now_is_not_set_aside(self):
++        shots = [snap("a", "2026-03-11T03:00+00:00"), snap("n", "2026-03-20T12:00+00:00")]
++        plan = plan_retention(shots, Policy(keep_last=1), NOW)
++        self.assertEqual(plan.keep, ["n"])
++        self.assertEqual(plan.prune, ["a"])
++
++    def test_protected_snapshot_is_never_a_bucket_representative(self):
++        shots = [snap("plain", "2026-03-11T01:00+00:00"), snap("rel", "2026-03-11T09:00+00:00", "release")]
++        plan = plan_retention(shots, Policy(keep_daily=1, protect_tags={"release"}), NOW)
++        self.assertEqual(plan.keep, ["rel", "plain"])
++        self.assertEqual(plan.prune, [])
++
++
++class CountingTest(unittest.TestCase):
++    def test_empty_periods_do_not_use_up_n(self):
++        shots = [snap("a", "2026-03-01T03:00+00:00"), snap("b", "2026-03-02T03:00+00:00"), snap("c", "2026-03-10T03:00+00:00")]
++        plan = plan_retention(shots, Policy(keep_daily=2), NOW)
++        self.assertEqual(plan.keep, ["c", "b"])
++        self.assertEqual(plan.prune, ["a"])
++
++    def test_same_taken_at_breaks_ties_by_greater_id(self):
++        t = "2026-03-11T03:00+00:00"
++        plan = plan_retention([snap("a", t), snap("b", t)], Policy(keep_last=1), NOW)
++        self.assertEqual(plan.keep, ["b"])
++        self.assertEqual(plan.prune, ["a"])
++
++
++class InputValidationTest(unittest.TestCase):
++    def test_naive_now_is_rejected(self):
++        with self.assertRaises(ValueError):
++            plan_retention([snap("a", "2026-03-11T03:00+00:00")], Policy(keep_last=1), datetime(2026, 3, 20, 12))
++
++    def test_duplicate_ids_are_rejected(self):
++        shots = [snap("a", "2026-03-10T03:00+00:00"), snap("a", "2026-03-11T03:00+00:00")]
++        with self.assertRaises(ValueError):
++            plan_retention(shots, Policy(keep_last=1), NOW)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/vaultsnap/retention.py b/vaultsnap/retention.py
+index 5ad59e7..7169ada 100644
+--- a/vaultsnap/retention.py
++++ b/vaultsnap/retention.py
+@@ -1,4 +1,5 @@
+ from dataclasses import dataclass
++from datetime import datetime, timedelta, timezone
+ 
+ 
+ @dataclass(frozen=True)
+@@ -16,5 +17,59 @@ def plan_retention(snapshots, policy, now):
+     """Decide which snapshots to keep and which to prune. Nothing is deleted here; this only plans.
+ 
+     `snapshots` is an iterable of Snapshot, `policy` a Policy, `now` a timezone-aware datetime.
++    The rules are those of docs/adr/0001 (with 0003 for ISO weeks and 0004 for day boundaries).
+     """
+-    raise NotImplementedError
++    snaps = list(snapshots)
++    _require_aware(now, "now")
++    seen = set()
++    for s in snaps:
++        _require_aware(s.taken_at, f"taken_at of snapshot {s.id!r}")
++        if s.id in seen:
++            raise ValueError(f"duplicate snapshot id {s.id!r}")
++        seen.add(s.id)
++
++    # Newest first. Ties on taken_at are broken by the greater id (ADR-0001, "Ordering").
++    ordered = sorted(snaps, key=lambda s: (s.taken_at, s.id), reverse=True)
++
++    # An empty policy never prunes (ADR-0001, "Rules").
++    if not policy.has_rules:
++        return Plan(keep=[s.id for s in ordered], prune=[])
++
++    # Set-aside snapshots: protected tags, or taken after `now` (ADR-0001, "Set-aside snapshots").
++    kept = {s.id for s in ordered if not s.tags.isdisjoint(policy.protect_tags) or s.taken_at > now}
++    remaining = [s for s in ordered if s.id not in kept]
++
++    if policy.keep_last:
++        kept.update(s.id for s in remaining[: policy.keep_last])
++
++    # Bucket keys are derived from the bucket time (ADR-0004); weeks are ISO weeks (ADR-0003).
++    bucket_keys = {
++        "keep_daily": lambda b: b.date(),
++        "keep_weekly": lambda b: b.isocalendar()[:2],
++        "keep_monthly": lambda b: (b.year, b.month),
++        "keep_yearly": lambda b: b.year,
++    }
++    for rule, key_of in bucket_keys.items():
++        count = getattr(policy, rule)
++        if not count:
++            continue
++        newest_in_bucket = {}
++        for s in remaining:  # newest first, so the first snapshot seen per bucket is its newest
++            newest_in_bucket.setdefault(key_of(_bucket_time(s.taken_at, policy)), s.id)
++        for key in sorted(newest_in_bucket, reverse=True)[:count]:
++            kept.add(newest_in_bucket[key])
++
++    keep = [s.id for s in ordered if s.id in kept]
++    prune = [s.id for s in ordered if s.id not in kept]
++    return Plan(keep=keep, prune=prune)
++
++
++def _require_aware(value, what):
++    if not isinstance(value, datetime) or value.utcoffset() is None:
++        raise ValueError(f"{what} must be a timezone-aware datetime, got {value!r}")
++
++
++def _bucket_time(taken_at, policy):
++    """Local time of a snapshot with the policy's fixed offset, shifted back by day_start_hour (ADR-0004)."""
++    local = taken_at.astimezone(timezone(timedelta(minutes=policy.tz_offset_minutes)))
++    return local - timedelta(hours=policy.day_start_hour)
