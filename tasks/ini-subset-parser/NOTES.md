@@ -42,3 +42,4 @@ The result checks do not hide anything: every hidden case applies a rule written
 ## Version history
 
 - v2 (2026-11-04): the first version of this task, pinned (version 1 is the unpinned exploratory form) and not yet frozen.
+- v3 (2026-11-04): `docs/FORMAT.md` now says that a backslash at the end of the line inside a double-quoted string is `unterminated string`, and that every malformed `@include` path is `invalid include`, never a string error. Three Sonnet pilot runs failed hidden error cases whose expectations the v2 text left open ("the path is a quoted string as above" against "anything else after `@include` is `invalid include`"; an end-of-line backslash read as either an invalid escape or an unterminated string). The grader is unchanged.

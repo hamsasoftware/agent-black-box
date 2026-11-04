@@ -17,3 +17,7 @@ None.
 Haiku passed 5 of 5, so this version does not separate models that are at least as capable as Haiku. The version is fair and unchanged; making it harder is a separate decision.
 
 - Verdict: approved
+
+### Calibration with Sonnet (not part of G3)
+
+Three Sonnet runs, bare variant, 2026-11-04: `20261104T153054Z-cache-stampede-bare-elm-25`, `20261104T153421Z-cache-stampede-bare-quill-26`, `20261104T153531Z-cache-stampede-bare-rook-26`. Passed 3 of 3, cost $0.43. Sonnet passed every run, so this version does not separate the two models.

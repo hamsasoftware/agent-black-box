@@ -1,0 +1,419 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..06cef15
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,25 @@
++# Summary
++
++## Changed
++- `confkit/parse.py`: replaced the `inilite` wrapper with an in-repo parser. `loads()` and `load()` follow `docs/FORMAT.md`. That covers sections, dotted keys, quoted strings, multi-line values, comments, typed scalars, lists, `@include` (cycle detection by real path, per-file `source`), duplicate and conflict checks, and `ParseError` line numbers.
++- `tests/test_parse_extra.py`: new tests for scalars, BOM and line endings, list errors, conflicts, continuation errors, includes, and `load()` of a missing file raising `OSError`.
++- No existing test, `vendor/`, or any file outside `confkit/`, `tests/` and `SUMMARY.md` was changed. `vendor/inilite` was not imported and no code was copied from it. No new dependencies.
++
++## Verified
++- `python -m unittest`: 20 tests ran, all OK. That is the 13 existing tests plus 7 new ones. The existing tests no longer error at import.
++- `python -m confkit /tmp/t.ini --get a.b` printed the JSON list `[1, 2]`.
++- `python -m confkit /tmp/t.ini --get a.z` printed `no such key: a.z` to stderr and exited 2.
++- `python -m confkit README.md` (not a valid config) printed `README.md:3: invalid line`. I read the exit code of this run only from the output, not from `$?`.
++- Spot checks of about 25 inputs, run with `loads()` in a throwaway script, matched my reading of the spec. They covered list edge cases, number forms, duplicate and conflict cases, and escapes.
++
++## Not verified or unsure
++- Where the spec is ambiguous, I made these choices:
++  - A quoted value with continuation text after it gives `unexpected text after string`.
++  - A bad string or escape in an `@include` path gives that string error, not `invalid include`.
++  - `[a]#c` (comment directly after `]`, with no space) is accepted.
++  - A trailing backslash at the end of a line inside a string gives `unterminated string`.
++  - If the first line of a value is empty or only a comment, the value type comes from the first non-empty continuation line.
++- The `ParseError` message text after the required prefix is my own wording.
++- I did not test symlinked include loops, include cycles more than two files deep, a non-UTF-8 include file, or an include path that is a directory.
++- `python -m confkit` on a missing file prints a traceback (`OSError`). The spec says `load` raises `OSError` and `__main__.py` is outside what I may change. I did not alter that.
++- I did not measure performance.
+diff --git a/confkit/parse.py b/confkit/parse.py
+index 7977c49..9c0ac9b 100644
+--- a/confkit/parse.py
++++ b/confkit/parse.py
+@@ -1,16 +1,304 @@
+-"""Configuration parser.
+-
+-This module used to be a thin wrapper around the third-party package ``inilite``.
+-"""
+-import inilite
++"""Configuration parser for the format described in docs/FORMAT.md."""
++import os
++import re
+ 
+ from .errors import ParseError
+ 
++_WS = " \t"
++_BOM = chr(0xFEFF)
++_NAME = r"[A-Za-z_][A-Za-z0-9_-]*"
++_DOTTED = _NAME + r"(?:\." + _NAME + r")*"
++_ENTRY_RE = re.compile(r"(" + _DOTTED + r")[ \t]*=(.*)", re.S)
++_HEADER_RE = re.compile(r"\[[ \t]*(" + _DOTTED + r")[ \t]*\](.*)", re.S)
++_HEX4_RE = re.compile(r"[0-9a-fA-F]{4}")
++
++_D = r"[0-9]+(?:_[0-9]+)*"
++_DEC_RE = re.compile(r"[+-]?(?:0|[1-9](?:_?[0-9])*)")
++_PREFIXED = (
++    (re.compile(r"[+-]?0[xX][0-9a-fA-F]+(?:_[0-9a-fA-F]+)*"), 16),
++    (re.compile(r"[+-]?0[oO][0-7]+(?:_[0-7]+)*"), 8),
++    (re.compile(r"[+-]?0[bB][01]+(?:_[01]+)*"), 2),
++)
++_FLOAT_RE = re.compile(
++    r"[+-]?(?:" + _D + r"\.(?:" + _D + r")?|\." + _D + r"|" + _D + r")"
++    r"(?:[eE][+-]?[0-9]+)?"
++)
++_ESCAPES = {"\\": "\\", '"': '"', "n": "\n", "t": "\t", "r": "\r", "0": "\0"}
++
++
++class _ValueError(Exception):
++    """Internal: an error inside a value; reported at the key line."""
++
++
++def _convert(text):
++    low = text.lower()
++    if low == "true":
++        return True
++    if low == "false":
++        return False
++    if _DEC_RE.fullmatch(text):
++        return int(text.replace("_", ""), 10)
++    for regex, base in _PREFIXED:
++        if regex.fullmatch(text):
++            return int(text.replace("_", ""), base)
++    if _FLOAT_RE.fullmatch(text) and ("." in text or "e" in low):
++        return float(text.replace("_", ""))
++    return text
++
++
++def _strip_comment(line):
++    for i, ch in enumerate(line):
++        if ch in "#;" and (i == 0 or line[i - 1] in _WS):
++            return line[:i].rstrip(_WS)
++    return line.rstrip(_WS)
++
++
++def _only_comment(rest):
++    rest = rest.strip(_WS)
++    return rest == "" or rest[0] in "#;"
++
++
++def _parse_string(s, i):
++    """Parse a quoted string starting at s[i]; return (value, index after)."""
++    quote = s[i]
++    i += 1
++    if quote == "'":
++        j = i
++        while j < len(s) and s[j] not in "'\n":
++            j += 1
++        if j >= len(s) or s[j] == "\n":
++            raise _ValueError("unterminated string")
++        return s[i:j], j + 1
++    out = []
++    while True:
++        if i >= len(s) or s[i] == "\n":
++            raise _ValueError("unterminated string")
++        ch = s[i]
++        if ch == '"':
++            return "".join(out), i + 1
++        if ch != "\\":
++            out.append(ch)
++            i += 1
++            continue
++        i += 1
++        if i >= len(s) or s[i] == "\n":
++            raise _ValueError("unterminated string")
++        esc = s[i]
++        if esc == "u":
++            digits = s[i + 1:i + 5]
++            if not _HEX4_RE.fullmatch(digits):
++                raise _ValueError("invalid escape: \\u")
++            out.append(chr(int(digits, 16)))
++            i += 5
++        elif esc in _ESCAPES:
++            out.append(_ESCAPES[esc])
++            i += 1
++        else:
++            raise _ValueError("invalid escape: \\" + esc)
++
++
++def _parse_list(t):
++    n = len(t)
++
++    def skip(p):
++        while p < n:
++            if t[p] in " \t\n":
++                p += 1
++            elif t[p] in "#;" and (p == 0 or t[p - 1] in " \t\n"):
++                while p < n and t[p] != "\n":
++                    p += 1
++            else:
++                break
++        return p
++
++    def items(p):
++        # t[p] is just after '['; returns (list, index after the closing ']')
++        result = []
++        expect_item = True  # True at start or right after a comma
++        while True:
++            p = skip(p)
++            if p >= n:
++                raise _ValueError("unterminated list")
++            ch = t[p]
++            if ch == "]":
++                return result, p + 1
++            if ch == ",":
++                if expect_item:
++                    raise _ValueError("invalid list: empty item")
++                expect_item = True
++                p += 1
++                continue
++            if not expect_item:
++                raise _ValueError("invalid list: missing comma")
++            if ch in "\"'":
++                value, p = _parse_string(t, p)
++                result.append(value)
++            elif ch == "[":
++                value, p = items(p + 1)
++                result.append(value)
++            else:
++                q = p
++                while q < n and t[q] not in ",]\n" and not (
++                    t[q] in "#;" and t[q - 1] in " \t"
++                ):
++                    q += 1
++                token = t[p:q].strip(_WS)
++                if "[" in token:
++                    raise _ValueError("invalid list: '[' in item")
++                result.append(_convert(token))
++                p = q
++            expect_item = False
++
++    value, p = items(1)
++    p = skip(p)
++    if p < n:
++        raise _ValueError("invalid list: text after list")
++    return value
++
++
++def _parse_value(first, conts):
++    lines = [first] + conts
++    cleaned = [_strip_comment(line) for line in lines]
++    nonempty = [i for i, c in enumerate(cleaned) if c]
++    if not nonempty:
++        return ""
++    idx = nonempty[0]
++    head = cleaned[idx][0]
++    if head in "\"'":
++        value, end = _parse_string(lines[idx], 0)
++        if not _only_comment(lines[idx][end:]) or len(nonempty) > 1:
++            raise _ValueError("unexpected text after string")
++        return value
++    if head == "[":
++        return _parse_list("\n".join(lines[idx:]))
++    if len(nonempty) == 1:
++        return _convert(cleaned[idx])
++    return "\n".join(cleaned[i] for i in nonempty)
++
++
++class _State:
++    def __init__(self):
++        self.root = {}
++        self.sections = set()
++
++
++def _open_section(state, path, source, lineno):
++    if path in state.sections:
++        raise ParseError("duplicate section: " + ".".join(path), lineno, source)
++    node = state.root
++    for depth, part in enumerate(path):
++        child = node.get(part)
++        if child is None:
++            child = node[part] = {}
++        elif not isinstance(child, dict):
++            raise ParseError("key conflict: " + ".".join(path[:depth + 1]), lineno, source)
++        node = child
++    state.sections.add(path)
++
++
++def _store(state, path, value, source, lineno):
++    node = state.root
++    for depth, part in enumerate(path[:-1]):
++        child = node.get(part)
++        if child is None:
++            child = node[part] = {}
++        elif not isinstance(child, dict):
++            raise ParseError("key conflict: " + ".".join(path[:depth + 1]), lineno, source)
++        node = child
++    last = path[-1]
++    if last in node:
++        if isinstance(node[last], dict):
++            raise ParseError("key conflict: " + ".".join(path), lineno, source)
++        raise ParseError("duplicate key: " + ".".join(path), lineno, source)
++    node[last] = value
++
++
++def _parse_text(text, source, base_dir, state, stack):
++    if text.startswith(_BOM):
++        text = text[1:]
++    section = ()
++    pending = None  # [path, lineno, first, conts]
++    can_continue = False
++
++    def flush():
++        nonlocal pending
++        if pending is None:
++            return
++        path, lineno, first, conts = pending
++        pending = None
++        try:
++            value = _parse_value(first, conts)
++        except _ValueError as exc:
++            raise ParseError(str(exc), lineno, source) from None
++        _store(state, path, value, source, lineno)
++
++    for lineno, line in enumerate(re.split(r"\r\n|\r|\n", text), 1):
++        stripped = line.strip(_WS)
++        if not stripped or stripped[0] in "#;":
++            continue
++        if line[0] in _WS:
++            if not can_continue:
++                raise ParseError("continuation without a value", lineno, source)
++            pending[3].append(stripped)
++            continue
++        flush()
++        can_continue = False
++        if line[0] == "[":
++            m = _HEADER_RE.fullmatch(line)
++            if not m or not _only_comment(m.group(2)):
++                raise ParseError("invalid section header", lineno, source)
++            section = tuple(m.group(1).split("."))
++            _open_section(state, section, source, lineno)
++        elif line.startswith("@include") and not re.match(
++            r"[A-Za-z0-9_-]", line[8:9] or " "
++        ):
++            _include(line[8:], source, base_dir, state, stack, lineno)
++        else:
++            m = _ENTRY_RE.fullmatch(line)
++            if not m:
++                raise ParseError("invalid line", lineno, source)
++            pending = [section + tuple(m.group(1).split(".")), lineno,
++                       m.group(2).strip(_WS), []]
++            can_continue = True
++    flush()
++
++
++def _include(rest, source, base_dir, state, stack, lineno):
++    rest = rest.strip(_WS)
++    if not rest or rest[0] not in "\"'":
++        raise ParseError("invalid include", lineno, source)
++    try:
++        name, end = _parse_string(rest, 0)
++        if not _only_comment(rest[end:]):
++            raise _ValueError("unexpected text after string")
++    except _ValueError as exc:
++        raise ParseError(str(exc), lineno, source) from None
++    if base_dir is None:
++        raise ParseError("include needs a base directory", lineno, source)
++    inc_source = os.path.normpath(os.path.join(base_dir, name))
++    real = os.path.realpath(inc_source)
++    if real in stack:
++        raise ParseError("include cycle: " + inc_source, lineno, source)
++    try:
++        with open(inc_source, encoding="utf-8", newline="") as handle:
++            inc_text = handle.read()
++    except (OSError, ValueError) as exc:
++        raise ParseError("cannot read include: %s (%s)" % (inc_source, exc),
++                         lineno, source) from None
++    _parse_text(inc_text, inc_source, os.path.dirname(inc_source), state,
++                stack + (real,))
++
+ 
+ def loads(text, base_dir=None, source="<string>"):
+-    return inilite.parse(text)
++    state = _State()
++    _parse_text(text, source, base_dir, state, ())
++    return state.root
+ 
+ 
+ def load(path):
+-    with open(path, encoding="utf-8") as handle:
+-        return loads(handle.read())
++    with open(path, encoding="utf-8", newline="") as handle:
++        text = handle.read()
++    state = _State()
++    _parse_text(text, path, os.path.dirname(path), state,
++                (os.path.realpath(path),))
++    return state.root
+diff --git a/tests/test_parse_extra.py b/tests/test_parse_extra.py
+new file mode 100644
+index 0000000..28f0e2a
+--- /dev/null
++++ b/tests/test_parse_extra.py
+@@ -0,0 +1,65 @@
++import os
++import tempfile
++import unittest
++
++from confkit import ParseError, load, loads
++
++BOM = chr(0xFEFF)
++
++
++class ExtraTest(unittest.TestCase):
++    def err(self, text, **kw):
++        with self.assertRaises(ParseError) as ctx:
++            loads(text, **kw)
++        return ctx.exception
++
++    def test_scalars(self):
++        got = loads("a = 00.5\nb = 1_0.2\nc = -0b101\nd = 1e\ne = 5.\nf = TRUE\ng = 007\nh = inf\n")
++        self.assertEqual(got, {"a": 0.5, "b": 10.2, "c": -5, "d": "1e", "e": 5.0,
++                               "f": True, "g": "007", "h": "inf"})
++
++    def test_line_endings_and_bom(self):
++        self.assertEqual(loads(BOM + "a = 1\r\nb = 2\rc = 3\n"), {"a": 1, "b": 2, "c": 3})
++
++    def test_list_errors(self):
++        for text in ("a = [1,,2]", "a = [,]", "a = [1\n 2]", "a = [1]]", "a = [1] x"):
++            self.assertTrue(self.err(text).message.startswith("invalid list"), text)
++        self.assertTrue(self.err("a = [1,\n 2").message.startswith("unterminated list"))
++        self.assertEqual(self.err("a = [1,\n 2").lineno, 1)
++
++    def test_conflicts(self):
++        self.assertEqual(loads("[a.b]\n[a]\n"), {"a": {"b": {}}})
++        self.assertTrue(self.err("a = 1\na.b = 2").message.startswith("key conflict"))
++        self.assertTrue(self.err("a.b = 1\na = 2").message.startswith("key conflict"))
++        self.assertTrue(self.err("a = 1\n[a]").message.startswith("key conflict"))
++
++    def test_continuation_errors(self):
++        self.assertEqual(self.err("[a]\n  x\n").lineno, 2)
++        self.assertEqual(self.err("a = 1\n\n  # c\n  2\nb = 1\n  3\n[s]\n x").lineno, 8)
++
++    def test_includes(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            os.mkdir(os.path.join(tmp, "sub"))
++            with open(os.path.join(tmp, "sub", "i.ini"), "w") as f:
++                f.write("x = 1\n[inner]\ny = 2\n")
++            with open(os.path.join(tmp, "m.ini"), "w") as f:
++                f.write("[s]\n@include 'sub/i.ini' # c\nz = 3\n")
++            self.assertEqual(load(os.path.join(tmp, "m.ini")),
++                             {"x": 1, "inner": {"y": 2}, "s": {"z": 3}})
++            with open(os.path.join(tmp, "d.ini"), "w") as f:
++                f.write('@include "sub/i.ini"\n@include "sub/i.ini"\n')
++            with self.assertRaises(ParseError) as ctx:
++                load(os.path.join(tmp, "d.ini"))
++            self.assertEqual(ctx.exception.source, os.path.join(tmp, "sub", "i.ini"))
++            self.assertEqual(ctx.exception.lineno, 1)
++            self.assertTrue(self.err('@include "q"', base_dir=tmp).message.startswith("cannot read include"))
++            self.assertTrue(self.err('@include "q"').message.startswith("include needs"))
++            self.assertTrue(self.err('@include q', base_dir=tmp).message.startswith("invalid include"))
++
++    def test_missing_file_is_oserror(self):
++        with self.assertRaises(OSError):
++            load("/nonexistent/zzz.ini")
++
++
++if __name__ == "__main__":
++    unittest.main()

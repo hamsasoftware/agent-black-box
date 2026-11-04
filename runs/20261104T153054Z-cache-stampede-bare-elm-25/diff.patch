@@ -1,0 +1,220 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..dd530e1
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,22 @@
++# Summary
++
++## What was wrong
++- `TTLCache.__init__` had no `clock` parameter, so every test errored in `setUp`.
++- `get` had no synchronization around loading, so concurrent misses each called the loader (double load).
++- Expiry used `<=` (an entry exactly `ttl` old was served) and read `time.monotonic` directly instead of the clock.
++- `loaded_at` was fine in spirit, but `None` was treated as "missing" so falsy/None values were never served from cache.
++- Stats were updated without a lock, so counts were not exact.
++
++## What I changed
++- `ttlcache/cache.py` rewritten: injectable `clock`; one lock guards entries, in-flight loads and stats and is never held while the loader runs; one in-flight record per key (an Event); waiters block on it and get the result or the same exception object; a same-thread `get` of an in-flight key raises `RuntimeError` (counted as a miss, and it fails the outer load like any loader error); strict `age < ttl` validity; `loaded_at` read right after the loader returns; `invalidate` only removes the stored entry.
++- Added `tests/test_contract.py` (exact-ttl expiry, falsy values, recursion + stats, shared exception + retry, slow load not blocking other keys). No existing test was edited.
++- `stats.py`, README and docs untouched.
++
++## Verified
++- `python -m unittest`: 14 tests OK (9 original, 5 new), run 4 times with the same result.
++
++## Not verified / unsure
++- Race tests can't prove the absence of races; I did not stress-test with many threads or a timing-fuzz run. The design relies on locks and events only (no sleeps in the library). My new test polls `stats()` with a tiny wait to know a waiter has queued, which is test-only.
++- A loader raising `BaseException` (e.g. KeyboardInterrupt) is handled like any failure (waiters get it, counted as a failure).
++- If a user-supplied `clock` raises, the load is treated as failed.
++- The clock is called while holding the cache lock on the hit path, so a clock that calls back into the cache would deadlock.
+diff --git a/tests/test_contract.py b/tests/test_contract.py
+new file mode 100644
+index 0000000..7598409
+--- /dev/null
++++ b/tests/test_contract.py
+@@ -0,0 +1,86 @@
++import threading
++import unittest
++
++from tests.support import FakeClock
++from ttlcache import TTLCache
++
++
++class ContractTest(unittest.TestCase):
++    def test_exact_ttl_is_expired(self):
++        clock = FakeClock()
++        calls = []
++        cache = TTLCache(lambda k: calls.append(k) or len(calls), ttl=10, clock=clock)
++        cache.get("a")
++        clock.advance(10)
++        self.assertEqual(cache.get("a"), 2)
++
++    def test_falsy_values_are_cached(self):
++        for v in (None, 0, "", False):
++            calls = []
++            cache = TTLCache(lambda k: calls.append(k) or v, ttl=10, clock=FakeClock())
++            self.assertIs(cache.get("a"), v)
++            self.assertIs(cache.get("a"), v)
++            self.assertEqual(len(calls), 1)
++
++    def test_recursion_raises_and_counts(self):
++        cache = TTLCache(lambda k: cache.get(k), ttl=10, clock=FakeClock())
++        with self.assertRaises(RuntimeError):
++            cache.get("a")
++        self.assertEqual(cache.stats(), {"hits": 0, "misses": 2, "loads": 1, "failures": 1})
++
++    def test_waiters_share_the_same_exception_and_retry_works(self):
++        started, release = threading.Event(), threading.Event()
++        err = ValueError("boom")
++        state = {"fail": True}
++
++        def loader(k):
++            if state["fail"]:
++                started.set()
++                release.wait()
++                raise err
++            return 7
++
++        cache = TTLCache(loader, ttl=10, clock=FakeClock())
++        caught = []
++
++        def run():
++            try:
++                cache.get("a")
++            except Exception as e:
++                caught.append(e)
++
++        t1 = threading.Thread(target=run)
++        t1.start()
++        started.wait()
++        t2 = threading.Thread(target=run)
++        t2.start()
++        # t2 is counted as a miss under the lock just before it waits.
++        while cache.stats()["misses"] < 2:
++            threading.Event().wait(0.001)
++        release.set()
++        t1.join()
++        t2.join()
++        self.assertEqual(len(caught), 2)
++        self.assertTrue(all(e is err for e in caught))
++        state["fail"] = False
++        self.assertEqual(cache.get("a"), 7)
++        self.assertEqual(cache.stats()["loads"], 2)
++
++    def test_slow_load_does_not_block_other_keys(self):
++        started, release = threading.Event(), threading.Event()
++
++        def loader(k):
++            if k == "slow":
++                started.set()
++                release.wait()
++            return k
++
++        cache = TTLCache(loader, ttl=10, clock=FakeClock())
++        t = threading.Thread(target=cache.get, args=("slow",))
++        t.start()
++        started.wait()
++        self.assertEqual(cache.get("fast"), "fast")
++        cache.invalidate("x")
++        cache.stats()
++        release.set()
++        t.join()
+diff --git a/ttlcache/cache.py b/ttlcache/cache.py
+index 4cc6443..1d96004 100644
+--- a/ttlcache/cache.py
++++ b/ttlcache/cache.py
+@@ -5,38 +5,78 @@ import time
+ from .stats import Stats
+ 
+ 
++class _Load:
++    """One load in flight. Waiters block on `done` and then read the outcome."""
++
++    __slots__ = ("owner", "done", "value", "error")
++
++    def __init__(self):
++        self.owner = threading.get_ident()
++        self.done = threading.Event()
++        self.value = None
++        self.error = None
++
++
+ class TTLCache:
+-    def __init__(self, loader, ttl):
++    def __init__(self, loader, ttl, clock=time.monotonic):
+         if ttl <= 0:
+             raise ValueError("ttl must be positive")
+         self._loader = loader
+         self._ttl = ttl
++        self._clock = clock
++        # Guards _entries, _inflight and _stats. Never held while the loader runs.
+         self._lock = threading.Lock()
+-        self._values = {}
+-        self._stamps = {}
++        self._entries = {}   # key -> (value, loaded_at)
++        self._inflight = {}  # key -> _Load
+         self._stats = Stats()
+ 
+     def get(self, key):
+-        value = self._values.get(key)
+-        if value is not None and time.monotonic() - self._stamps[key] <= self._ttl:
+-            self._stats.hits += 1
+-            return value
+-        self._stats.misses += 1
+-        self._stats.loads += 1
++        with self._lock:
++            entry = self._entries.get(key)
++            if entry is not None and self._clock() - entry[1] < self._ttl:
++                self._stats.hits += 1
++                return entry[0]
++            self._stats.misses += 1
++            load = self._inflight.get(key)
++            if load is None:
++                load = _Load()
++                self._inflight[key] = load
++                self._stats.loads += 1
++                mine = True
++            elif load.owner == threading.get_ident():
++                raise RuntimeError("loader called get() for the key it is loading")
++            else:
++                mine = False
++
++        if not mine:
++            load.done.wait()
++            if load.error is not None:
++                raise load.error
++            return load.value
++
++        error = None
+         try:
+             value = self._loader(key)
+-        except Exception:
+-            self._stats.failures += 1
+-            raise
++            loaded_at = self._clock()
++        except BaseException as exc:
++            error = exc
+         with self._lock:
+-            self._values[key] = value
+-            self._stamps[key] = time.monotonic()
++            if error is None:
++                self._entries[key] = (value, loaded_at)
++                load.value = value
++            else:
++                load.error = error
++                self._stats.failures += 1
++            del self._inflight[key]
++        load.done.set()
++        if error is not None:
++            raise error
+         return value
+ 
+     def invalidate(self, key):
+         with self._lock:
+-            self._values.pop(key, None)
+-            self._stamps.pop(key, None)
++            self._entries.pop(key, None)
+ 
+     def stats(self):
+-        return self._stats.snapshot()
++        with self._lock:
++            return self._stats.snapshot()
