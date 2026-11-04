@@ -23,11 +23,13 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | Errors logged | 50, 11 still open |
 <!-- facts:end -->
 
+**Reading the table.** A "run" is one agent attempting one task once; "clean" runs are the ones counted. "Passed" means a hidden checker the agent never sees agreed the job was done. Behaviour tags stay "unaudited" until a person has checked a sample of them, and an unaudited tag is a lead, not a finding. Nearly every task was passed nearly every time, so these runs say little about which model is better. [docs/results.md](docs/results.md) opens with a plain-language summary, a table per model, a table per task and a glossary.
+
 ## Start here
 
 | I want to... | Go to |
 |---|---|
-| See what we found | [docs/results.md](docs/results.md) |
+| See what we found, in plain words | [docs/results.md](docs/results.md), with the long tables in [docs/results-detail.md](docs/results-detail.md) |
 | See what went wrong while building this, and what fixed it | [docs/incidents.md](docs/incidents.md) |
 | Watch a recorded agent work | [Run it yourself](#run-it-yourself), then browse [runs/](runs/) |
 | Read the tasks and their traps | [tasks/README.md](tasks/README.md) |

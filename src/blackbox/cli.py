@@ -235,7 +235,7 @@ def parser() -> argparse.ArgumentParser:
     common(sp)
     sp.set_defaults(fn=cmd_index)
 
-    sp = sub.add_parser("report", help="write docs/results.md")
+    sp = sub.add_parser("report", help="write docs/results.md and docs/results-detail.md")
     common(sp)
     sp.set_defaults(fn=cmd_report)
 

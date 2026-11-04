@@ -1,5 +1,6 @@
 import json
 
+from blackbox import report
 from blackbox.cli import main
 
 PASSED_BOTH = {"claim-classifier": "passed", "claim-contradicted-by-grader": "passed"}
@@ -27,7 +28,7 @@ def test_index_and_report(tmp_path):
     assert [r["agent_name"] for r in rows] == ["Ember", "Ember", "Ember"]
     assert rows[1]["behaviours"] == ["minimal-diff", "premature-stop"]
     assert main(["report", "--root", str(root)]) == 0
-    md = (root / "docs" / "results.md").read_text()
+    md = (root / "docs" / "results-detail.md").read_text()
     assert "| t1 | v1 | m | bare | 2 of 2 | 1/2 (50%) | 0.50 | 0.2000 | 10 | 20 | 3.0 | minimal-diff (unaudited), premature-stop (unaudited) |" in md
     assert "| t1 | v1 | m | plumbed | 1 of 1 | 1/1 (100%) | 1.00 | n/a |" in md
     assert rows[0]["claim_outcome"] == "unknown" and rows[0]["confounded_by"] == []
@@ -36,7 +37,7 @@ def test_index_and_report(tmp_path):
 
 def test_empty_report(tmp_path):
     assert main(["report", "--root", str(tmp_path)]) == 0
-    md = (tmp_path / "docs" / "results.md").read_text()
+    md = (tmp_path / "docs" / "results-detail.md").read_text()
     assert "Runs: 0. Clean: 0. Confounded: 0." in md and "| none | | | | 0 of 0 |" in md
 
 
@@ -55,11 +56,14 @@ def test_models_are_never_pooled(tmp_path):
     fake_model_run(root, "20261102T000003Z-t1-bare-rook", "model-b", False)
     assert main(["index", "--root", str(root)]) == 0
     assert main(["report", "--root", str(root)]) == 0
+    detail = (root / "docs" / "results-detail.md").read_text()
     md = (root / "docs" / "results.md").read_text()
-    assert "| t1 | v1 | model-a | bare | 2 of 2 | 2/2 (100%) |" in md
-    assert "| t1 | v1 | model-b | bare | 1 of 1 | 0/1 (0%) |" in md
+    assert "| t1 | v1 | model-a | bare | 2 of 2 | 2/2 (100%) |" in detail
+    assert "| t1 | v1 | model-b | bare | 1 of 1 | 0/1 (0%) |" in detail
     assert "| model-a | bare | exploratory | 2 | 2/2 (100%) | 0.5000 | unaudited | unaudited |" in md
     assert "| model-b | bare | exploratory | 1 | 0/1 (0%) | 0.5000 | unaudited | unaudited |" in md
+    assert "| t1 | v1 | 2/2 (100%), $0.500, 3.0 turns | 0/1 (0%), $0.500, 3.0 turns |" in md
+    md = md + detail
     assert "2/3" not in md and "(67%)" not in md
 
 
@@ -144,3 +148,46 @@ def test_a_protocol_version_without_a_phase_is_exploratory_everywhere_in_the_rep
     assert report._basis({"run_id": "old"}) == "exploratory"
     assert report._basis({"run_id": "x", "protocol_version": 1, "phase": None}) == "exploratory"
     assert report._basis({"run_id": "x", "protocol_version": 1, "phase": 1}) == "protocol 1"
+
+
+def plain_rows():
+    base = {"task_id": "t", "variant": "bare", "model": "m", "cost_usd": 0.2, "turns": 4, "behaviours": ["minimal-diff"]}
+    return [
+        {**base, "run_id": "a", "passed": True},
+        {**base, "run_id": "b", "passed": False},
+        {**base, "run_id": "c", "passed": True, "confounded_by": ["INC-1"]},
+        {**base, "run_id": "d", "task_id": "u", "passed": True},
+    ]
+
+
+def test_the_short_page_leads_with_plain_language_computed_from_the_rows():
+    md = report.render_main(plain_rows(), [])
+    assert md.index("## In plain words") < md.index("### Per model") < md.index("### Per task") < md.index("### Glossary")
+    assert "4 runs of 2 tasks" in md and "3 are clean" in md and "1 were set aside" in md
+    assert "passed 2 of 3 clean runs overall" in md
+    assert "1 of 2 task versions were passed in every clean run" in md
+    assert "1 different tags appear on clean runs and 0 have passed an audit" in md
+    assert "| m | bare | exploratory | 3 | 2/3 (67%) | 0.2000 | 4.0 |" in md
+    assert "withheld" in md
+    for term in ("Run", "Task", "Grader", "Tag", "Audit", "Unaudited", "Claim classifier", "Exploratory vs protocol"):
+        assert f"- **{term}:" in md
+
+
+def test_plain_page_counts_a_tag_only_once_audited_and_shows_claims_when_classifier_passed():
+    md = report.render_main(plain_rows(), [], {"minimal-diff": "passed", "claim-classifier": "passed"})
+    assert "1 have passed an audit" not in md and "1 has passed an audit" in md
+    assert "so the counts are shown" in md
+
+
+def test_the_long_tables_are_not_on_the_short_page_and_are_linked():
+    rows, states = plain_rows(), None
+    main_md, detail = report.render_main(rows, [], states), report.render_detail(rows, [], states)
+    assert "results-detail.md" in main_md
+    assert "## By task" not in main_md and "## Claims versus grader" not in main_md and "## Confounded runs" not in main_md
+    assert "## By task" in detail and "## Claims versus grader" in detail and "## Confounded runs" in detail
+    assert report.render(rows, [], states) == main_md + "\n" + detail
+
+
+def test_the_plain_page_says_none_when_empty():
+    md = report.render_main([], [])
+    assert "0 runs of 0 tasks" in md and "| none | | | 0 | | | |" in md and "| none | | |" in md

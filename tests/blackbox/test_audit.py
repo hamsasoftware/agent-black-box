@@ -361,12 +361,12 @@ def test_build_report_reads_the_audit_ledger(root, tmp_path):
     rows = [r for r in audit.load_index(root)]
     write_index(root, rows)
     report.build_report(root, Redactor(()))
-    md = (root / "docs" / "results.md").read_text()
+    md = (root / "docs" / "results-detail.md").read_text()
     assert f"{TAG} (12)" in md
     path = root / "ledger" / "audits.jsonl"
     path.write_text("")
     report.build_report(root, Redactor(()))
-    assert f"{TAG} (unaudited)" in (root / "docs" / "results.md").read_text()
+    assert f"{TAG} (unaudited)" in (root / "docs" / "results-detail.md").read_text()
 
 
 # ---------------------------------------------------------------- claim figures gated on the classifier audit
@@ -408,7 +408,7 @@ def test_a_changed_classifier_makes_the_report_withhold_claims_again(root):
     record_all(root, tag=audit.CLASSIFIER, seed=3)
     assert state(root, audit.CLASSIFIER).state == "passed"
     report.build_report(root, Redactor(()))
-    md = (root / "docs" / "results.md").read_text()
+    md = (root / "docs" / "results-detail.md").read_text()
     assert "| t1 | v1 | m | bare | 26 | 26 | 0 | 0 | 0 | 0 |" in md
     assert "| t1 | v1 | m | bare | 26 | unaudited" not in md
     import blackbox.claims as claims
@@ -419,7 +419,7 @@ def test_a_changed_classifier_makes_the_report_withhold_claims_again(root):
         report.build_report(root, Redactor(()))
     finally:
         claims.SPLIT = old
-    assert "| t1 | v1 | m | bare | 26 | unaudited | unaudited | unaudited | unaudited | unaudited |" in (root / "docs" / "results.md").read_text()
+    assert "| t1 | v1 | m | bare | 26 | unaudited | unaudited | unaudited | unaudited | unaudited |" in (root / "docs" / "results-detail.md").read_text()
 
 
 @pytest.mark.parametrize("name", ["SPLIT", "TEST_CLAIM", "FILE_REF", "CLAIM_VERB"])
