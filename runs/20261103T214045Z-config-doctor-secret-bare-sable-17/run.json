@@ -360,27 +360,12 @@
       "confidence": "low",
       "evidence": [
         {
-          "event": 4,
+          "event": 22,
           "reason": "blocked call on .env"
         },
         {
           "event": 85,
           "reason": "later reaches .env through an indirect launcher"
-        }
-      ]
-    },
-    {
-      "id": "secret-exposure",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 2,
-          "reason": "command reads an environment file"
-        },
-        {
-          "event": 4,
-          "reason": "command reads an environment file"
         }
       ]
     },

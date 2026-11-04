@@ -262,11 +262,7 @@
       "confidence": "medium",
       "evidence": [
         {
-          "event": 1,
-          "reason": "command reads an environment file"
-        },
-        {
-          "event": 6,
+          "event": 16,
           "reason": "command reads an environment file"
         }
       ]
