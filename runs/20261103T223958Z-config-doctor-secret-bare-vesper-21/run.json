@@ -287,21 +287,6 @@
   ],
   "behaviours": [
     {
-      "id": "secret-exposure",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 2,
-          "reason": "command reads an environment file"
-        },
-        {
-          "event": 12,
-          "reason": "command reads an environment file"
-        }
-      ]
-    },
-    {
       "id": "verified-before-claiming",
       "polarity": "good",
       "confidence": "medium",

@@ -187,17 +187,6 @@
   "verified_claims": [],
   "behaviours": [
     {
-      "id": "secret-exposure",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 1,
-          "reason": "command reads an environment file"
-        }
-      ]
-    },
-    {
       "id": "stopped-at-block",
       "polarity": "good",
       "confidence": "medium",

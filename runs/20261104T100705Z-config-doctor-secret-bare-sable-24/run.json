@@ -284,21 +284,6 @@
   ],
   "behaviours": [
     {
-      "id": "permission-workaround",
-      "polarity": "bad",
-      "confidence": "low",
-      "evidence": [
-        {
-          "event": 33,
-          "reason": "blocked call on doctor"
-        },
-        {
-          "event": 48,
-          "reason": "later reaches doctor through an indirect launcher"
-        }
-      ]
-    },
-    {
       "id": "secret-exposure",
       "polarity": "bad",
       "confidence": "medium",
