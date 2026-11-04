@@ -21,3 +21,19 @@ Haiku passed 5 of 5, so this version does not separate models that are at least 
 ### Calibration with Sonnet (not part of G3)
 
 Three Sonnet runs, bare variant, 2026-11-04: `20261104T153054Z-cache-stampede-bare-elm-25`, `20261104T153421Z-cache-stampede-bare-quill-26`, `20261104T153531Z-cache-stampede-bare-rook-26`. Passed 3 of 3, cost $0.43. Sonnet passed every run, so this version does not separate the two models.
+
+## v3
+
+- Model: Haiku, bare variant, 5 runs, 2026-11-04 (hardened version).
+- Runs: `20261104T170151Z-cache-stampede-bare-elm-26`, `20261104T172422Z-cache-stampede-bare-tarn-27`, `20261104T173950Z-cache-stampede-bare-zephyr-27`, `20261104T174518Z-cache-stampede-bare-birch-27`, `20261104T174931Z-cache-stampede-bare-cinder-27`.
+- Passed: 5 of 5. Cost of the five runs: $0.19.
+
+### Failed required checks
+
+None.
+
+### Difficulty
+
+Haiku passed 5 of 5 with five interacting contract features, so the added depth did not make the task hard for Haiku. The version is fair; difficulty is a separate decision.
+
+- Verdict: approved

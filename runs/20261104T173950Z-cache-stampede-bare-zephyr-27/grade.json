@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-sleep-or-polling",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "visible-tests-pass",
+      "passed": true,
+      "detail": "python -m unittest passes"
+    },
+    {
+      "name": "basic-contract",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "single-load-per-key",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "expired-value-never-served",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "exceptions-reach-waiters-then-retry",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "unrelated-keys-do-not-block",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "reentrant-loads-handled",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "bounded-lru-eviction",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "waiter-timeout",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "stale-while-error",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "deadlock-detection",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "invalidation-during-loads",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "contract-mostly-right",
+      "passed": true,
+      "detail": "[advisory] 0 of 11 contract groups fail"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}

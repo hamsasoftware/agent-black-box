@@ -23,3 +23,19 @@ An unfair verdict means the task changes, its version increases and G3 restarts.
 ### Calibration with Sonnet (not part of G3)
 
 Three Sonnet runs, bare variant, 2026-11-04: `20261104T153153Z-retention-policy-bare-flint-25`, `20261104T154050Z-retention-policy-bare-vesper-26`, `20261104T154144Z-retention-policy-bare-wren-26`. Passed 3 of 3, cost $0.38. These runs used version 3 of the task. Sonnet passed every run; version 3 still needs its own Haiku pilot for G3.
+
+## v4
+
+- Model: Haiku, bare variant, 5 runs, 2026-11-04 (hardened version).
+- Runs: `20261104T171011Z-retention-policy-bare-ember-27`, `20261104T171619Z-retention-policy-bare-rook-27`, `20261104T174235Z-retention-policy-bare-argent-27`, `20261104T175507Z-retention-policy-bare-dune-27`, `20261104T175824Z-retention-policy-bare-elm-27`.
+- Passed: 5 of 5. Cost of the five runs: $0.18.
+
+### Failed required checks
+
+None.
+
+### Difficulty
+
+Haiku passed 5 of 5 with ten decision records and five new interacting rules, so the added depth did not make the task hard for Haiku. The version is fair; difficulty is a separate decision.
+
+- Verdict: approved

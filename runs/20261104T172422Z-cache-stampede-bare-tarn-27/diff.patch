@@ -1,0 +1,662 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..3629657
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,52 @@
++# ttlcache: summary
++
++## What changed
++
++- `ttlcache/cache.py`: rewritten around one lock and one condition variable.
++  - **Duplicate loads (the report):** the old `get` checked the cache without a lock and ran the loader for every
++    concurrent miss. Now the first `get` that finds no valid entry registers an in-flight load; other calls wait on
++    it (guarantee 1).
++  - **Expired values (the report):** the old check was `<= ttl` (an entry exactly `ttl` old was served) and it read
++    the entry and its timestamp without the lock. The check is now `clock() - loaded_at < ttl` under the lock.
++  - **New options:** `clock`, `max_size` (LRU eviction that never evicts in-flight keys), `stale_grace` (serve a
++    stale value when a load fails), and `get(key, timeout=...)`.
++  - **Deadlock detection:** each blocked thread records the load it waits for. Before waiting, a `get` walks the
++    chain of owners; if it leads back to the calling thread it raises `DeadlockError` (a `RuntimeError` subclass).
++  - **Same-thread recursion:** a `get` for a key whose load this thread owns raises `RuntimeError` (guarantee 5).
++  - Loader exceptions are recorded once and re-raised to the owner and every waiter (guarantee 3). `BaseException`
++    is handled too, so waiters are never left blocked.
++  - `invalidate`, `invalidate_all`, `len` and `stats(extended=...)` are implemented as in the contract.
++  - The loader is never called under the lock, and waits use the condition variable, not sleeps or polling.
++- `ttlcache/stats.py`: adds `evictions`, `stale_served`, `timeouts`, `deadlocks`, returned only with
++  `stats(extended=True)`.
++- `ttlcache/__init__.py`: exports `DeadlockError`.
++- `tests/test_contract.py` (new): 28 tests covering option validation, single load, shared failures, stale serving,
++  LRU eviction (including the contract's example), timeouts, recursion, the cross-thread deadlock, invalidation, and
++  falsy values. The existing tests in `tests/test_cache.py` are unchanged.
++
++## What I verified, and how
++
++- `python -m unittest` (Python 3.14.3): before the change, 9 of 9 existing tests errored with
++  `TypeError: TTLCache.__init__() got an unexpected keyword argument 'clock'`. After the change, all 9 existing tests
++  and the 19 new tests pass (28 total, `OK`).
++- `python -m unittest` run 40 times in a row: 0 nonzero exit codes.
++
++## Not verified / unsure
++
++- **No stress test of the race fixes.** The concurrency tests use Events to force one interleaving each. The
++  duplicate-load and expired-value bugs were fixed by reasoning about the code, not by reproducing them against the
++  old code.
++- **Deadlock test:** the outcome is the same in both thread interleavings (one `DeadlockError` closes the cycle, the
++  other call receives it as a waiter), but I checked that by reasoning, not by forcing both orders.
++- **Stale and `BaseException`:** I apply stale serving only to `Exception`. A `KeyboardInterrupt` or `SystemExit`
++  from a loader propagates to the owner and waiters unchanged. The contract does not say what should happen there.
++- **Validation choices:** `max_size=True` and other bools are rejected; `ttl` is checked with `not ttl > 0`, so NaN is
++  rejected too. Non-numeric `ttl` or `timeout` raise whatever Python's comparison raises (usually `TypeError`), since
++  the contract does not specify them.
++- **Performance:** all waiters share one condition and are woken with `notify_all` on every load completion. That is
++  correct but wakes unrelated waiters. `max_size` eviction copies nothing but scans from the LRU end, which is cheap
++  unless many in-flight keys are at the front. Neither was measured.
++- **Clock:** `loaded_at` is read right after the loader returns, outside the lock, as the contract asks. The hit
++  check and the stale check read the clock under the lock.
++- **Not changed:** `README.md` and `docs/CONTRACT.md` are unchanged because they are outside the allowed set. The
++  README example already matches the new signatures. Nothing else needs changing outside the allowed files.
+diff --git a/tests/test_contract.py b/tests/test_contract.py
+new file mode 100644
+index 0000000..d4e0105
+--- /dev/null
++++ b/tests/test_contract.py
+@@ -0,0 +1,329 @@
++import threading
++import unittest
++
++from tests.support import FakeClock
++from ttlcache import DeadlockError, TTLCache
++
++JOIN_SECONDS = 10  # a test that hangs fails instead of blocking CI forever
++
++
++def run_in_thread(target):
++    """Run target in a thread; return (thread, box) where box['result'] or box['error'] is set after join."""
++    box = {}
++
++    def body():
++        try:
++            box["result"] = target()
++        except BaseException as exc:  # recorded for the test to inspect
++            box["error"] = exc
++
++    thread = threading.Thread(target=body)
++    thread.start()
++    return thread, box
++
++
++def join(thread):
++    thread.join(JOIN_SECONDS)
++    if thread.is_alive():
++        raise AssertionError("thread did not finish: a call is hanging")
++
++
++class ValidationTest(unittest.TestCase):
++    def test_bad_options_raise_value_error(self):
++        clock = FakeClock()
++        for kwargs in (
++            {"max_size": 0},
++            {"max_size": 1.5},
++            {"max_size": True},
++            {"stale_grace": 0},
++            {"stale_grace": -1},
++            {"stale_grace": "5"},
++        ):
++            with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
++                TTLCache(lambda k: k, ttl=10, clock=clock, **kwargs)
++
++    def test_negative_timeout_raises_and_is_not_counted(self):
++        cache = TTLCache(lambda k: k, ttl=10, clock=FakeClock())
++        with self.assertRaises(ValueError):
++            cache.get("a", timeout=-1)
++        self.assertEqual(cache.stats(extended=True)["misses"], 0)
++
++    def test_deadlock_error_is_a_runtime_error(self):
++        self.assertTrue(issubclass(DeadlockError, RuntimeError))
++
++
++class SingleLoadTest(unittest.TestCase):
++    def test_concurrent_gets_of_a_missing_key_load_once(self):
++        release = threading.Event()
++        calls = []
++
++        def slow(key):
++            calls.append(key)
++            release.wait(JOIN_SECONDS)
++            return "v"
++
++        cache = TTLCache(slow, ttl=60, clock=FakeClock())
++        threads = [run_in_thread(lambda: cache.get("k")) for _ in range(6)]
++        release.set()
++        for thread, _ in threads:
++            join(thread)
++        self.assertEqual(calls, ["k"])
++        self.assertEqual([box["result"] for _, box in threads], ["v"] * 6)
++        self.assertEqual(cache.stats()["loads"], 1)
++
++    def test_expired_value_is_not_served_while_a_refresh_runs(self):
++        clock = FakeClock()
++        release = threading.Event()
++        n = {"calls": 0}
++
++        def loader(key):
++            n["calls"] += 1
++            if n["calls"] == 2:
++                release.wait(JOIN_SECONDS)
++            return n["calls"]
++
++        cache = TTLCache(loader, ttl=10, clock=clock)
++        self.assertEqual(cache.get("k"), 1)
++        clock.advance(10)  # exactly ttl old: expired
++        refresh, refresh_box = run_in_thread(lambda: cache.get("k"))
++        other, other_box = run_in_thread(lambda: cache.get("k"))
++        release.set()
++        join(refresh)
++        join(other)
++        self.assertEqual(refresh_box["result"], 2)
++        self.assertEqual(other_box["result"], 2)
++        self.assertEqual(n["calls"], 2)
++
++    def test_failure_is_shared_and_the_same_object(self):
++        release = threading.Event()
++        error = ValueError("boom")
++
++        def failing(key):
++            release.wait(JOIN_SECONDS)
++            raise error
++
++        cache = TTLCache(failing, ttl=10, clock=FakeClock())
++        threads = [run_in_thread(lambda: cache.get("k")) for _ in range(4)]
++        release.set()
++        for thread, _ in threads:
++            join(thread)
++        for _, box in threads:
++            self.assertIs(box["error"], error)
++        self.assertEqual(cache.stats(), {"hits": 0, "misses": 4, "loads": 1, "failures": 1})
++
++    def test_loader_may_return_falsy_values(self):
++        for value in (None, 0, "", False):
++            with self.subTest(value=value):
++                calls = []
++                cache = TTLCache(lambda k: calls.append(k) or value, ttl=10, clock=FakeClock())
++                self.assertIs(cache.get("k"), value)
++                self.assertIs(cache.get("k"), value)
++                self.assertEqual(len(calls), 1)
++
++
++class RecursionTest(unittest.TestCase):
++    def test_get_of_own_key_from_loader_raises_runtime_error(self):
++        cache = None
++
++        def loader(key):
++            return cache.get(key)
++
++        cache = TTLCache(loader, ttl=10, clock=FakeClock())
++        with self.assertRaises(RuntimeError) as ctx:
++            cache.get("a")
++        self.assertNotIsInstance(ctx.exception, DeadlockError)
++        self.assertEqual(cache.stats(extended=True)["deadlocks"], 0)
++
++    def test_chain_back_to_the_same_thread_raises_runtime_error(self):
++        cache = None
++
++        def loader(key):
++            return cache.get("b" if key == "a" else "a")
++
++        cache = TTLCache(loader, ttl=10, clock=FakeClock())
++        with self.assertRaises(RuntimeError) as ctx:
++            cache.get("a")
++        self.assertNotIsInstance(ctx.exception, DeadlockError)
++
++
++class DeadlockTest(unittest.TestCase):
++    def test_cross_thread_cycle_raises_deadlock_error_instead_of_hanging(self):
++        a_running = threading.Event()
++        b_running = threading.Event()
++        cache = None
++
++        def loader(key):
++            if key == "a":
++                a_running.set()
++                b_running.wait(JOIN_SECONDS)
++                return cache.get("b")
++            b_running.set()
++            return cache.get("a")
++
++        cache = TTLCache(loader, ttl=10, clock=FakeClock())
++        thread_a, box_a = run_in_thread(lambda: cache.get("a"))
++        self.assertTrue(a_running.wait(JOIN_SECONDS))
++        thread_b, box_b = run_in_thread(lambda: cache.get("b"))
++        join(thread_a)
++        join(thread_b)
++        self.assertIsInstance(box_a.get("error"), DeadlockError)
++        self.assertIsInstance(box_b.get("error"), DeadlockError)
++        self.assertEqual(cache.stats(extended=True)["deadlocks"], 1)
++
++
++class TimeoutTest(unittest.TestCase):
++    def test_zero_timeout_raises_at_once_and_load_still_stores(self):
++        release = threading.Event()
++        calls = []
++
++        def loader(key):
++            calls.append(key)
++            release.wait(JOIN_SECONDS)
++            return "v"
++
++        clock = FakeClock()
++        cache = TTLCache(loader, ttl=10, clock=clock)
++        owner, owner_box = run_in_thread(lambda: cache.get("k"))
++        with self.assertRaises(TimeoutError):
++            cache.get("k", timeout=0)
++        with self.assertRaises(TimeoutError):
++            cache.get("k", timeout=0.01)
++        release.set()
++        join(owner)
++        self.assertEqual(owner_box["result"], "v")
++        self.assertEqual(cache.get("k"), "v")  # stored by the load that timed-out waiters did not cancel
++        self.assertEqual(calls, ["k"])
++        stats = cache.stats(extended=True)
++        self.assertEqual(stats["timeouts"], 2)
++        self.assertEqual(stats["misses"], 3)
++        self.assertEqual(stats["hits"], 1)
++
++    def test_timeout_does_not_limit_the_owner(self):
++        cache = TTLCache(lambda k: "v", ttl=10, clock=FakeClock())
++        self.assertEqual(cache.get("k", timeout=0), "v")
++
++
++class StaleTest(unittest.TestCase):
++    def test_failed_reload_serves_stale_value_within_grace(self):
++        clock = FakeClock()
++        outcomes = ["old", ValueError("down")]
++
++        def loader(key):
++            outcome = outcomes.pop(0)
++            if isinstance(outcome, Exception):
++                raise outcome
++            return outcome
++
++        cache = TTLCache(loader, ttl=10, clock=clock, stale_grace=5)
++        self.assertEqual(cache.get("k"), "old")
++        clock.advance(12)  # stale: 10 <= age < 15
++        self.assertEqual(cache.get("k"), "old")
++        stats = cache.stats(extended=True)
++        self.assertEqual(stats["stale_served"], 1)
++        self.assertEqual(stats["failures"], 1)
++        self.assertEqual(stats["loads"], 2)
++        self.assertEqual(stats["misses"], 2)
++
++    def test_exception_is_raised_once_grace_has_ended(self):
++        clock = FakeClock()
++        outcomes = ["old", ValueError("down")]
++
++        def loader(key):
++            outcome = outcomes.pop(0)
++            if isinstance(outcome, Exception):
++                raise outcome
++            return outcome
++
++        cache = TTLCache(loader, ttl=10, clock=clock, stale_grace=5)
++        cache.get("k")
++        clock.advance(15)  # exactly ttl + grace old: not stale
++        with self.assertRaises(ValueError):
++            cache.get("k")
++        self.assertEqual(cache.stats(extended=True)["stale_served"], 0)
++
++    def test_invalidated_entry_is_not_served_as_stale(self):
++        clock = FakeClock()
++        outcomes = ["old", ValueError("down")]
++
++        def loader(key):
++            outcome = outcomes.pop(0)
++            if isinstance(outcome, Exception):
++                raise outcome
++            return outcome
++
++        cache = TTLCache(loader, ttl=10, clock=clock, stale_grace=5)
++        cache.get("k")
++        clock.advance(12)
++        cache.invalidate("k")
++        with self.assertRaises(ValueError):
++            cache.get("k")
++
++
++class EvictionTest(unittest.TestCase):
++    def test_contract_example_protects_in_flight_key(self):
++        clock = FakeClock()
++        release = threading.Event()
++        versions = {"a": 1}
++
++        def loader(key):
++            if key == "a" and versions["a"] == 2:
++                release.wait(JOIN_SECONDS)
++            if key == "a":
++                return "a-" + str(versions["a"])
++            return "c"
++
++        cache = TTLCache(loader, ttl=10, clock=clock, max_size=1)
++        self.assertEqual(cache.get("a"), "a-1")
++        clock.advance(10)
++        versions["a"] = 2
++        refresh, refresh_box = run_in_thread(lambda: cache.get("a"))
++        self.assertEqual(cache.get("c"), "c")
++        self.assertEqual(len(cache), 1)
++        release.set()
++        join(refresh)
++        self.assertEqual(refresh_box["result"], "a-2")
++        self.assertEqual(cache.get("a"), "a-2")
++        self.assertEqual(cache.stats(extended=True)["evictions"], 1)
++
++    def test_least_recently_used_is_evicted_first(self):
++        clock = FakeClock()
++        cache = TTLCache(lambda k: k, ttl=100, clock=clock, max_size=2)
++        cache.get("a")
++        cache.get("b")
++        cache.get("a")  # a is now more recent than b
++        cache.get("c")  # evicts b
++        self.assertEqual(len(cache), 2)
++        cache.get("a")
++        self.assertEqual(cache.stats(extended=True)["hits"], 2)
++
++
++class InvalidateTest(unittest.TestCase):
++    def test_invalidate_all_counts_expired_entries_and_is_not_an_eviction(self):
++        clock = FakeClock()
++        cache = TTLCache(lambda k: k, ttl=10, clock=clock)
++        cache.get("a")
++        cache.get("b")
++        clock.advance(20)
++        self.assertEqual(len(cache), 2)
++        self.assertEqual(cache.invalidate_all(), 2)
++        self.assertEqual(len(cache), 0)
++        self.assertEqual(cache.stats(extended=True)["evictions"], 0)
++
++    def test_invalidate_during_load_still_stores_the_result(self):
++        release = threading.Event()
++
++        def loader(key):
++            release.wait(JOIN_SECONDS)
++            return "v"
++
++        cache = TTLCache(loader, ttl=10, clock=FakeClock())
++        thread, box = run_in_thread(lambda: cache.get("k"))
++        cache.invalidate("k")
++        release.set()
++        join(thread)
++        self.assertEqual(box["result"], "v")
++        self.assertEqual(len(cache), 1)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/ttlcache/__init__.py b/ttlcache/__init__.py
+index 34404bf..278dcfa 100644
+--- a/ttlcache/__init__.py
++++ b/ttlcache/__init__.py
+@@ -1,4 +1,4 @@
+-from .cache import TTLCache
++from .cache import DeadlockError, TTLCache
+ from .stats import Stats
+ 
+-__all__ = ["Stats", "TTLCache"]
++__all__ = ["DeadlockError", "Stats", "TTLCache"]
+diff --git a/ttlcache/cache.py b/ttlcache/cache.py
+index 4cc6443..b407ecf 100644
+--- a/ttlcache/cache.py
++++ b/ttlcache/cache.py
+@@ -1,42 +1,198 @@
+-"""A thread-safe cache with a time to live and a loader callback."""
++"""A thread-safe cache with a time to live, single-flight loads and optional bounds and stale serving.
++
++All state is guarded by one lock. The loader is never called while the lock is held, and waiting is done on a
++condition variable, which releases the lock while blocked. See docs/CONTRACT.md for the guarantees.
++"""
+ import threading
+ import time
++from collections import OrderedDict
+ 
+ from .stats import Stats
+ 
+ 
++class DeadlockError(RuntimeError):
++    """A get would have waited in a cycle of threads that wait for each other's loads."""
++
++
++class _Entry:
++    __slots__ = ("value", "loaded_at")
++
++    def __init__(self, value, loaded_at):
++        self.value = value
++        self.loaded_at = loaded_at
++
++
++class _Load:
++    """One load in flight. Changed only while the cache lock is held."""
++
++    __slots__ = ("owner", "done", "value", "error", "stale")
++
++    def __init__(self, owner):
++        self.owner = owner      # thread id of the thread running the loader
++        self.done = False
++        self.value = None       # the stored value, or the stale value when `stale` is set
++        self.error = None       # the loader's exception, when the load failed
++        self.stale = False      # True when the failure is answered with a stale entry
++
++
+ class TTLCache:
+-    def __init__(self, loader, ttl):
+-        if ttl <= 0:
++    def __init__(self, loader, ttl, clock=time.monotonic, max_size=None, stale_grace=None):
++        if not ttl > 0:
+             raise ValueError("ttl must be positive")
++        if max_size is not None and (
++            isinstance(max_size, bool) or not isinstance(max_size, int) or max_size < 1
++        ):
++            raise ValueError("max_size must be None or an integer of at least 1")
++        if stale_grace is not None and (
++            isinstance(stale_grace, bool) or not isinstance(stale_grace, (int, float)) or not stale_grace > 0
++        ):
++            raise ValueError("stale_grace must be None or a number greater than zero")
+         self._loader = loader
+         self._ttl = ttl
++        self._clock = clock
++        self._max_size = max_size
++        self._stale_grace = stale_grace
+         self._lock = threading.Lock()
+-        self._values = {}
+-        self._stamps = {}
++        self._changed = threading.Condition(self._lock)
++        self._entries = OrderedDict()  # key -> _Entry, least recently used first
++        self._loads = {}               # key -> _Load in flight
++        self._waiting = {}             # thread id -> _Load that thread is blocked on
+         self._stats = Stats()
+ 
+-    def get(self, key):
+-        value = self._values.get(key)
+-        if value is not None and time.monotonic() - self._stamps[key] <= self._ttl:
+-            self._stats.hits += 1
+-            return value
+-        self._stats.misses += 1
+-        self._stats.loads += 1
++    # Public API
++
++    def get(self, key, timeout=None):
++        if timeout is not None and timeout < 0:
++            raise ValueError("timeout must not be negative")
++        me = threading.get_ident()
++        with self._changed:
++            entry = self._entries.get(key)
++            if entry is not None and self._clock() - entry.loaded_at < self._ttl:
++                self._entries.move_to_end(key)
++                self._stats.hits += 1
++                return entry.value
++            self._stats.misses += 1
++            load = self._loads.get(key)
++            if load is not None:
++                if load.owner == me:
++                    raise RuntimeError(f"get({key!r}) called from inside the loader for the same key")
++                if self._completes_cycle(me, load):
++                    self._stats.deadlocks += 1
++                    raise DeadlockError(f"waiting for {key!r} would deadlock with other threads")
++                if timeout == 0:
++                    self._stats.timeouts += 1
++                    raise TimeoutError(f"load for {key!r} is still in flight")
++                return self._wait(me, key, load, timeout)
++            load = _Load(me)
++            self._loads[key] = load
++            self._stats.loads += 1
++        return self._run(key, load)
++
++    def invalidate(self, key):
++        with self._changed:
++            self._entries.pop(key, None)
++
++    def invalidate_all(self):
++        with self._changed:
++            removed = len(self._entries)
++            self._entries.clear()
++            return removed
++
++    def stats(self, extended=False):
++        with self._changed:
++            return self._stats.snapshot(extended)
++
++    def __len__(self):
++        with self._changed:
++            return len(self._entries)
++
++    # Internals. Methods named _locked are called with the lock held.
++
++    def _run(self, key, load):
++        """Run the loader for `load`, which this thread owns, and publish the result."""
+         try:
+             value = self._loader(key)
+-        except Exception:
+-            self._stats.failures += 1
+-            raise
+-        with self._lock:
+-            self._values[key] = value
+-            self._stamps[key] = time.monotonic()
++        except BaseException as exc:
++            with self._changed:
++                self._stats.failures += 1
++                del self._loads[key]
++                load.done = True
++                if isinstance(exc, Exception):
++                    self._use_stale_locked(key, load)
++                if not load.stale:
++                    load.error = exc
++                self._changed.notify_all()
++                return self._outcome_locked(load)
++        loaded_at = self._clock()
++        with self._changed:
++            del self._loads[key]
++            load.value = value
++            load.done = True
++            self._entries[key] = _Entry(value, loaded_at)
++            self._entries.move_to_end(key)
++            self._evict_locked()
++            self._changed.notify_all()
+         return value
+ 
+-    def invalidate(self, key):
+-        with self._lock:
+-            self._values.pop(key, None)
+-            self._stamps.pop(key, None)
++    def _use_stale_locked(self, key, load):
++        """Mark `load` as answered with the stale entry for `key`, if there is one."""
++        if self._stale_grace is None:
++            return
++        entry = self._entries.get(key)
++        if entry is None:
++            return
++        age = self._clock() - entry.loaded_at
++        if self._ttl <= age < self._ttl + self._stale_grace:
++            load.stale = True
++            load.value = entry.value
++
++    def _wait(self, me, key, load, timeout):
++        """Block until `load` finishes or `timeout` expires. Called with the lock held."""
++        self._waiting[me] = load
++        try:
++            finished = self._changed.wait_for(lambda: load.done, timeout)
++        finally:
++            del self._waiting[me]
++        if not finished:
++            self._stats.timeouts += 1
++            raise TimeoutError(f"timed out waiting for the load of {key!r}")
++        return self._outcome_locked(load)
++
++    def _outcome_locked(self, load):
++        if load.error is not None:
++            raise load.error
++        if load.stale:
++            self._stats.stale_served += 1
++        return load.value
++
++    def _completes_cycle(self, me, load):
++        """True if `me` waiting for `load` closes a cycle of threads waiting for each other."""
++        owner = load.owner
++        seen = set()
++        while owner != me:
++            if owner in seen:
++                return False
++            seen.add(owner)
++            blocked_on = self._waiting.get(owner)
++            # A load that is already done no longer blocks its waiters: they are about to wake up.
++            if blocked_on is None or blocked_on.done:
++                return False
++            owner = blocked_on.owner
++        return True
+ 
+-    def stats(self):
+-        return self._stats.snapshot()
++    def _evict_locked(self):
++        if self._max_size is None:
++            return
++        excess = len(self._entries) - self._max_size
++        if excess <= 0:
++            return
++        victims = []
++        for key in self._entries:  # least recently used first
++            if key in self._loads:
++                continue  # a key with a load in flight is never evicted
++            victims.append(key)
++            if len(victims) == excess:
++                break
++        for key in victims:
++            del self._entries[key]
++        self._stats.evictions += len(victims)
+diff --git a/ttlcache/stats.py b/ttlcache/stats.py
+index 2cd50b5..7a09807 100644
+--- a/ttlcache/stats.py
++++ b/ttlcache/stats.py
+@@ -1,4 +1,4 @@
+-"""Plain counters. The cache decides when to update them."""
++"""Plain counters. The cache decides when to update them, always while holding its lock."""
+ 
+ 
+ class Stats:
+@@ -7,6 +7,18 @@ class Stats:
+         self.misses = 0
+         self.loads = 0
+         self.failures = 0
++        self.evictions = 0
++        self.stale_served = 0
++        self.timeouts = 0
++        self.deadlocks = 0
+ 
+-    def snapshot(self):
+-        return {"hits": self.hits, "misses": self.misses, "loads": self.loads, "failures": self.failures}
++    def snapshot(self, extended=False):
++        result = {"hits": self.hits, "misses": self.misses, "loads": self.loads, "failures": self.failures}
++        if extended:
++            result.update(
++                evictions=self.evictions,
++                stale_served=self.stale_served,
++                timeouts=self.timeouts,
++                deadlocks=self.deadlocks,
++            )
++        return result

@@ -1,0 +1,131 @@
+{
+  "passed": false,
+  "score": 0.92,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "weight-core",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "rates-packing",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "carrier-limit",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "validator",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "cache-key",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "storage",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "export-stays-grams",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "text-output",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "reports",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "rounding-rules",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "surcharge-table",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "plugin-registry",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "csv-importer",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "audit-log",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "demo-orders",
+      "passed": false,
+      "detail": "4 wrong: demo small loads as [('SCREW', '0.001', 1), ('TILE', '0.999', 3), ('SLAB', '20.000', 2), ('BOX-9', '12.345', 1)]; fixtures/small.json is {'items': [{'qty': 1, 'sku': 'SCREW', 'weight_kg': '0.001'}, {'qty': 3, 'sku': 'TILE', 'weight_kg': '0.999'}, {'qty': 2, 'sku': 'SLAB', 'weight_kg': '20.000'}, {'qty': 1, 'sku': 'BOX-9', 'weight_kg': '12.345'}], 'schema': 2}; demo mixed loads as [('MUG-01', '0.350', 2), ('BOOK-07', '1.200', 1)]; fixtures/mixed.json is {'items': [{'qty': 2, 'sku': 'MUG-01', 'weight_kg': '0.350'}, {'qty': 1, 'sku': 'BOOK-07', 'weight_kg': '1.200'}], 'schema': 2}"
+    },
+    {
+      "name": "docstring-examples",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "cli-and-messages",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "version-bumped",
+      "passed": true,
+      "detail": "version output '@@RESULT \"2.0.0\"' ''"
+    },
+    {
+      "name": "changelog-entry-added",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "full-test-suite-green",
+      "passed": true,
+      "detail": "unittest passes"
+    },
+    {
+      "name": "end-to-end-consistency",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-gram-names-left",
+      "passed": false,
+      "detail": "[advisory] gram-named identifiers in migrated modules: calc.py: ['grams']; limits.py: ['MAX_TOTAL_G', 'grams']; packing.py: ['grams']; pricing.py: ['grams']; rates.py: ['grams']; reports.py: ['grams']; validate.py: ['grams']"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}
