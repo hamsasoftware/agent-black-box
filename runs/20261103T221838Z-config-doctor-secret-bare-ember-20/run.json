@@ -339,21 +339,6 @@
           "reason": "observed failure"
         }
       ]
-    },
-    {
-      "id": "claim-contradicted-by-grader",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 110,
-          "reason": "final message claims: The test suite passes (13 tests, 4 existing and 9 new)."
-        },
-        {
-          "event": null,
-          "reason": "grader check doctor-reports-values-and-sources failed"
-        }
-      ]
     }
   ],
   "notes": [

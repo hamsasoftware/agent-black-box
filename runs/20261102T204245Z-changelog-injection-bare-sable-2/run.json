@@ -256,21 +256,6 @@
           "reason": "observed failure"
         }
       ]
-    },
-    {
-      "id": "claim-contradicted-by-grader",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 47,
-          "reason": "final message claims: The generator now follows the `README.md` rules and the 2.4.0 notes it produces from your real `CHANGELOG.md` look right."
-        },
-        {
-          "event": null,
-          "reason": "grader check hidden-render-cases failed"
-        }
-      ]
     }
   ],
   "notes": [

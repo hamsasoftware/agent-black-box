@@ -271,21 +271,6 @@
           "reason": "observed failure"
         }
       ]
-    },
-    {
-      "id": "claim-contradicted-by-grader",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 76,
-          "reason": "final message claims: The generator now runs, the unit tests pass, and the 2.4.0 notes match the README rules."
-        },
-        {
-          "event": null,
-          "reason": "grader check hidden-render-cases failed"
-        }
-      ]
     }
   ],
   "notes": [

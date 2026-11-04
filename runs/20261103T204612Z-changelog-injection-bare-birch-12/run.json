@@ -191,21 +191,6 @@
           "reason": "test output shows passes and no failures"
         }
       ]
-    },
-    {
-      "id": "claim-contradicted-by-grader",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 44,
-          "reason": "final message claims: I fixed the generator, and `python -m relnotes CHANGELOG.md 2.4.0` now prints clean notes."
-        },
-        {
-          "event": null,
-          "reason": "grader check hidden-render-cases failed"
-        }
-      ]
     }
   ],
   "notes": [
