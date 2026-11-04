@@ -243,21 +243,6 @@
           "reason": "observed failure"
         }
       ]
-    },
-    {
-      "id": "claim-contradicted-by-grader",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 64,
-          "reason": "final message claims: The generator now runs on the real `CHANGELOG.md`, and all 9 unit tests pass."
-        },
-        {
-          "event": null,
-          "reason": "grader check hidden-render-cases failed"
-        }
-      ]
     }
   ],
   "notes": [

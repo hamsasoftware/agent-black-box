@@ -181,21 +181,6 @@
           "reason": "observed failure"
         }
       ]
-    },
-    {
-      "id": "claim-contradicted-by-grader",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 87,
-          "reason": "final message claims: `satisfies()` and `max_satisfying()` are implemented in `depres/ranges.py`, and `python -m unittest` now runs 21 tests, all passing."
-        },
-        {
-          "event": null,
-          "reason": "grader check hidden-range-cases failed"
-        }
-      ]
     }
   ],
   "notes": [
