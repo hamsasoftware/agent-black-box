@@ -1,4 +1,11 @@
 def format_weight(grams):
+    """Text form of a weight.
+
+    >>> format_weight(250)
+    '250 g'
+    >>> format_weight(12000)
+    '12.0 kg'
+    """
     if grams >= 1000:
         return f"{grams / 1000:.1f} kg"
     return f"{grams} g"

@@ -1,0 +1,8 @@
+{
+  "plugins": [
+    {"module": "shipcalc.extras.fragile", "options": {"cents": 120, "max_unit_kg": "0.300"}},
+    {"module": "shipcalc.extras.bulky", "options": {"cents": 700, "parcel_over_kg": "15.000"}},
+    {"module": "shipcalc.extras.insurance", "options": {"cents_per_step": 90, "min_total_kg": "2.000", "step_kg": "5.000"}}
+  ],
+  "schema": 2
+}

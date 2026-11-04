@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"qty": 30, "sku": "CRATE-A", "weight_kg": "15.000"},
+    {"qty": 12, "sku": "CRATE-B", "weight_kg": "2.500"}
+  ],
+  "schema": 2
+}

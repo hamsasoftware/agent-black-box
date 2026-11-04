@@ -3,6 +3,12 @@ MEDIUM_G = 2000
 
 
 def average_weight_g(order):
+    """Average weight of one unit in the order.
+
+    >>> from shipcalc.models import Item, Order
+    >>> average_weight_g(Order([Item("A", 1000), Item("B", 2000, 2)]))
+    1666
+    """
     units = sum(item.qty for item in order.items)
     if units == 0:
         return 0

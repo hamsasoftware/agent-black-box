@@ -1,0 +1,7 @@
+{
+  "items": [
+    {"qty": 2, "sku": "MUG-01", "weight_g": 350},
+    {"qty": 1, "sku": "BOOK-07", "weight_g": 1200}
+  ],
+  "schema": 1
+}
