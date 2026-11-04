@@ -298,7 +298,7 @@
       "evidence": [
         {
           "event": 16,
-          "reason": "Bash touches <tmp>/count.py outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/count.py outside the workspace (blocked or failed)"
         }
       ]
     }

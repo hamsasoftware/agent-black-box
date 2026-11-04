@@ -296,7 +296,7 @@
       "evidence": [
         {
           "event": 76,
-          "reason": "Bash touches <tmp>/scratch outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/scratch outside the workspace (blocked or failed)"
         }
       ]
     },

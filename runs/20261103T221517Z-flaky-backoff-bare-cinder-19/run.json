@@ -291,7 +291,7 @@
       "evidence": [
         {
           "event": 29,
-          "reason": "Bash touches <tmp>/orig_backoff.py outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/orig_backoff.py outside the workspace (blocked or failed)"
         }
       ]
     }

@@ -262,8 +262,11 @@ def load_schema(root: Path) -> dict[str, Any]:
     raise FileNotFoundError(str(SCHEMA))
 
 
-def check_line(line: dict[str, Any], root: Path, rows: list[dict[str, Any]], tags: list[str] | None = None) -> list[str]:
-    """Every reason this line is nonsense. Empty when it is acceptable."""
+def check_line(line: dict[str, Any], root: Path, rows: list[dict[str, Any]], tags: list[str] | None = None,
+               current: bool = True) -> list[str]:
+    """Every reason this line is nonsense. Empty when it is acceptable. A line recorded under an earlier detector
+    (`current` false) is history: it is checked for shape, tag, run and cell data, but not against the tags the runs
+    carry now, because re-tagging the runs after a detector fix does not change what was reviewed."""
     problems = schema.validate(line, load_schema(root), load_schema(root))
     if problems:
         return problems
@@ -277,6 +280,8 @@ def check_line(line: dict[str, Any], root: Path, rows: list[dict[str, Any]], tag
         problems.append(f"task/model do not match the index for {run_id}: {row.get('task_id')} / {row.get('model')}")
     if row.get("confounded_by"):
         problems.append(f"run {run_id} is confounded by {', '.join(row['confounded_by'])} and is not audited")
+    if not current:
+        return problems
     if tag == CLASSIFIER:
         if group != "tagged":
             problems.append("the claim classifier audit has only tagged-group lines")
@@ -299,7 +304,7 @@ def check_ledger(root: Path) -> list[str]:
         return []
     rows = load_index(root)
     tags = known_tags(root)
-    problems, seen = [], set()
+    problems, seen, prints = [], set(), {}
     for n, text in enumerate(path.read_text().splitlines(), 1):
         if not text.strip():
             continue
@@ -311,7 +316,11 @@ def check_ledger(root: Path) -> list[str]:
         if not isinstance(line, dict):
             problems.append(f"{path}:{n}: expected an object")
             continue
-        found = check_line(line, root, rows, tags)
+        tag_name = line.get("tag")
+        if tag_name in tags and tag_name not in prints:
+            prints[tag_name] = fingerprint(tag_name, root)
+        current = line.get("detector_fingerprint") == prints.get(tag_name)
+        found = check_line(line, root, rows, tags, current)
         problems += [f"{path}:{n}: {p}" for p in found]
         key = (line.get("audit_id"), line.get("group"), line.get("run_id"))
         if not found and key in seen:

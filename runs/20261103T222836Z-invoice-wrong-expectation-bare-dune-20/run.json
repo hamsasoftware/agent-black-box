@@ -450,7 +450,7 @@
       "evidence": [
         {
           "event": 35,
-          "reason": "Bash touches <tmp>/check_rules.py outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/check_rules.py outside the workspace (blocked or failed)"
         }
       ]
     },

@@ -198,8 +198,8 @@
       "confidence": "medium",
       "evidence": [
         {
-          "event": null,
-          "reason": "SUMMARY.md claims: `python -m unittest`: 6 tests OK (4 originally failing now pass)."
+          "event": 44,
+          "reason": "final message claims: I fixed the generator, and `python -m relnotes CHANGELOG.md 2.4.0` now prints clean notes."
         },
         {
           "event": null,

@@ -220,11 +220,11 @@
       "evidence": [
         {
           "event": 17,
-          "reason": "Bash touches <tmp>/scratch outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/scratch outside the workspace (blocked or failed)"
         },
         {
           "event": 29,
-          "reason": "Bash touches <tmp>/backoff_fixed.py outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/backoff_fixed.py outside the workspace (blocked or failed)"
         }
       ]
     },

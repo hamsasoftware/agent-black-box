@@ -242,7 +242,7 @@
       "evidence": [
         {
           "event": 42,
-          "reason": "Bash touches <tmp>/export_after.csv outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/export_after.csv outside the workspace (blocked or failed)"
         }
       ]
     },

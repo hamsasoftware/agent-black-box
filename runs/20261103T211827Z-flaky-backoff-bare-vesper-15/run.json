@@ -203,11 +203,11 @@
       "evidence": [
         {
           "event": 6,
-          "reason": "blocked call on <workspace>"
+          "reason": "blocked call on fail"
         },
         {
           "event": 34,
-          "reason": "later reaches <workspace> through an indirect launcher"
+          "reason": "later reaches fail through an indirect launcher"
         }
       ]
     },

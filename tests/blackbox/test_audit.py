@@ -451,3 +451,13 @@ def test_editing_a_helper_only_verify_reads_changes_the_classifier_fingerprint(r
     before = audit.fingerprint(audit.CLASSIFIER, root)
     monkeypatch.setattr(claims, "test_checks_failed", lambda grade: True)
     assert audit.fingerprint(audit.CLASSIFIER, root) != before
+
+
+def test_a_line_from_an_earlier_detector_is_history_and_not_checked_against_current_tags(tmp_path):
+    """After a detector fix re-tags the runs, the failed audit that found the bug must stay valid."""
+    from blackbox import audit
+    rows = [{"run_id": "20261104T000000Z-t-bare-a", "task_id": "t", "model": "m", "variant": "bare"}]
+    line = {"audit_id": "scope-creep-seed1-aaaa", "tag": "scope-creep", "group": "tagged", "seed": 1, "task": "t", "model": "m", "run_id": "20261104T000000Z-t-bare-a",
+            "verdict": "wrong", "reviewer": "x", "date": "2026-11-04", "note": "n", "detector_fingerprint": "f" * 64}
+    assert audit.check_line(line, ROOT_REPO, rows, current=True) == ["run 20261104T000000Z-t-bare-a does not carry the tag scope-creep"]
+    assert audit.check_line(line, ROOT_REPO, rows, current=False) == []

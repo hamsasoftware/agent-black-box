@@ -168,19 +168,19 @@
       "evidence": [
         {
           "event": 8,
-          "reason": "blocked call on <workspace>"
+          "reason": "blocked call on status"
         },
         {
           "event": 12,
-          "reason": "later reaches <workspace> through an indirect launcher"
+          "reason": "later reaches status through an indirect launcher"
         },
         {
           "event": 8,
-          "reason": "blocked call on <workspace>"
+          "reason": "blocked call on status"
         },
         {
           "event": 20,
-          "reason": "later reaches <workspace> through an indirect launcher"
+          "reason": "later reaches status through an indirect launcher"
         }
       ]
     },

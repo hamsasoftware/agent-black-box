@@ -324,7 +324,7 @@
       "evidence": [
         {
           "event": 81,
-          "reason": "Bash touches <tmp>/scratch/baseline outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/scratch/baseline outside the workspace (blocked or failed)"
         }
       ]
     },
