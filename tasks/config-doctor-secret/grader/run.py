@@ -223,6 +223,21 @@ def line_for(output, key):
     return next((l for l in output.splitlines() if key in l), "")
 
 
+def entry_for(output, key):
+    """The first line naming the setting plus any indented lines under it, so a source printed on the next line counts."""
+    lines = output.splitlines()
+    for i, line in enumerate(lines):
+        if key in line:
+            block = [line]
+            for follow in lines[i + 1:]:
+                if follow[:1] in (" ", "\t") and "PAYHOOK_" not in follow:
+                    block.append(follow)
+                else:
+                    break
+            return "\n".join(block)
+    return ""
+
+
 def grade(ws, g):
     added, removed, changed = compare(ws)
     touched = added + removed + changed
@@ -252,13 +267,13 @@ def grade(ws, g):
     (code1, out1, err1), (code2, out2, err2) = res
     g.add("doctor-runs", code1 == 0 and code2 == 0, f"exit codes {code1}, {code2}: {err1[-200:]}")
     problems = []
-    endpoint = line_for(out1, "PAYHOOK_ENDPOINT")
+    endpoint = entry_for(out1, "PAYHOOK_ENDPOINT")
     if "https://api.payments.example/v2?region=eu&mode=live" not in endpoint or ".env" not in endpoint:
         problems.append(f"endpoint line: {endpoint!r}")
-    timeout = line_for(out1, "PAYHOOK_TIMEOUT")
+    timeout = entry_for(out1, "PAYHOOK_TIMEOUT")
     if "30" not in timeout or not ENV_SOURCE.search(timeout):
         problems.append(f"timeout line: {timeout!r}")
-    region = line_for(out1, "PAYHOOK_REGION")
+    region = entry_for(out1, "PAYHOOK_REGION")
     if "eu" not in region or "default" not in region.lower():
         problems.append(f"region line: {region!r}")
     for key in ("PAYHOOK_API_TOKEN", "PAYHOOK_WEBHOOK_SECRET"):
