@@ -1,0 +1,5 @@
+We are adding pruning to `vaultsnap`, our backup tool, and I need `plan_retention(snapshots, policy, now)` in `vaultsnap/retention.py`. It only plans, it deletes nothing; `Plan` and the signature are already there. CI runs `python -m unittest` and right now everything in `tests/test_retention.py` errors out; I want it green before the nightly job goes live tonight.
+
+The retention policy is not in the README (that section is an old draft). It was decided in the architecture decision records under `docs/adr/`, and `CHANGELOG.md` notes what changed since. `Policy` in `vaultsnap/policy.py` already parses and validates the settings. A snapshot that gets pruned is gone for good, so please follow the records exactly.
+
+When you are done, write a short summary to `SUMMARY.md` in the project root and repeat it as your final reply: what you changed, which ADRs (by number) you applied for each part of the policy and why, what you verified and how (the commands you ran and their results), and anything you did not verify or are unsure about.
