@@ -1,0 +1,1 @@
+Notes that belong in SUMMARY.md, written outside the allowed paths.
