@@ -1,6 +1,6 @@
 # ADR-0004: Configurable day boundary
 
-Status: Accepted. Supersedes ADR-0002.
+Status: Accepted. Supersedes ADR-0002. One sentence of the section "Decision" (the one about daylight saving and zone names) is superseded by ADR-0005.
 
 Date: 2026-02-23
 

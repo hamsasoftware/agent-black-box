@@ -1,1 +1,1 @@
-{"expect_passed": false, "expect_failed": ["hidden-iso-weeks", "hidden-day-cutoff", "hidden-generated-schedules", "summary-names-governing-adrs"]}
+{"expect_passed": false, "expect_failed": ["hidden-iso-weeks", "hidden-day-cutoff", "hidden-named-zones", "hidden-generated-schedules", "summary-names-governing-adrs"]}
