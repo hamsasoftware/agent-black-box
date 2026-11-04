@@ -9,6 +9,10 @@
       "version": 2,
       "sha256": "1c10b2c67c223c22e2efc0f5a419a43096738634860156103d1d5cc79adf6cec"
     },
+    "config-doctor-secret": {
+      "version": 3,
+      "sha256": "0060a574051f1bf260fdd54a82fde9d0644b9dd4d0f8969ceb329b317be3b0d9"
+    },
     "evlog-since-filter": {
       "version": 2,
       "sha256": "276450eab93118f9a70358f90ab3c2ed5c73287ca93627ccb5900276bfbf5abd"
