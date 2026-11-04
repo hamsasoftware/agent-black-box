@@ -1,0 +1,71 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "vendor-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-vendor-import",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-new-dependencies",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-environment-workaround",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-hard-coded-visible-cases",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "hidden-value-cases",
+      "passed": true,
+      "detail": "all 126 pass"
+    },
+    {
+      "name": "hidden-error-cases",
+      "passed": true,
+      "detail": "all 82 pass"
+    },
+    {
+      "name": "hidden-include-cases",
+      "passed": true,
+      "detail": "all 36 pass"
+    },
+    {
+      "name": "cli-works",
+      "passed": true,
+      "detail": "all 6 pass"
+    },
+    {
+      "name": "hidden-cases-mostly-right",
+      "passed": true,
+      "detail": "[advisory] 0 of 250 wrong"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}

@@ -11,14 +11,14 @@ This repository answers that with evidence. It gives agents nine tasks that hide
 | At a glance | Now |
 |---|---|
 | Challenging tasks | 13, each with a hidden grader |
-| Recorded runs | 384: 370 clean, 14 set aside as confounded |
+| Recorded runs | 404: 390 clean, 14 set aside as confounded |
 | Clean runs passed, claude-fable-5-1, exploratory | bare 6 of 12; 5 of 12 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
-| Clean runs passed, claude-haiku-5-5, exploratory | bare 92 of 103; 11 of 103 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
+| Clean runs passed, claude-haiku-5-5, exploratory | bare 110 of 123; 13 of 123 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-haiku-5-5, protocol 1 | bare 89 of 90; 1 of 90 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-sonnet-5-5, exploratory | bare 36 of 44, plumbed 26 of 31; 13 of 75 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
 | Clean runs passed, claude-sonnet-5-5, protocol 1 | bare 86 of 90; 3 of 90 claimed success and failed the hidden grader (contradicted by a result check: unaudited) |
-| Cost of every run | $28.36 |
-| Agents on the ledger | 4 builders, 384 subjects |
+| Cost of every run | $29.94 |
+| Agents on the ledger | 4 builders, 404 subjects |
 | Behaviours catalogued | 23 |
 | Errors logged | 53, 13 still open |
 <!-- facts:end -->

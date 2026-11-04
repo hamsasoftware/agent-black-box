@@ -21,7 +21,7 @@ Lines end with `\n`, `\r\n` or `\r`. Space and tab are whitespace. Line numbers 
 
 ## Comments
 
-An inline comment starts at a `#` or `;` that is the first character of the text or is preceded by whitespace, and that is not inside a quoted string. It runs to the end of the line. `url = http://h/a#b` and `x = a;b` contain no comment. Inline comments are allowed after section headers, include directives, values and on continuation lines.
+An inline comment starts at a `#` or `;` that is the first character of the text or is preceded by whitespace, and that is not inside a quoted string. For a value, "the text" is the value text, which begins right after the `=` (leading whitespace of the value is not part of it for this rule): in `a =# nothing` the `#` is the first character of the value text, so it starts a comment and the value is empty, while in `a = x#y` the `#` follows `x`, not whitespace, so there is no comment. It runs to the end of the line. `url = http://h/a#b` and `x = a;b` contain no comment. Inline comments are allowed after section headers, include directives, values and on continuation lines.
 
 ## Names
 

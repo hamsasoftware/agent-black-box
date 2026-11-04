@@ -27,3 +27,21 @@ Three Sonnet runs, bare variant, 2026-11-04: `20261104T152809Z-ini-subset-parser
 - Verdict: rejected
 
 An unfair verdict means the task changes, its version increases and G3 restarts. Version 3 states both rules in `docs/FORMAT.md` (the grader is unchanged); it needs a new Haiku pilot.
+
+## v3
+
+- Model: Haiku, bare variant, 5 runs, 2026-11-04 (hardened version).
+- Runs: `20261104T164859Z-ini-subset-parser-bare-birch-26`, `20261104T165315Z-ini-subset-parser-bare-cinder-26`, `20261104T171250Z-ini-subset-parser-bare-quill-27`, `20261104T172712Z-ini-subset-parser-bare-vesper-27`, `20261104T173057Z-ini-subset-parser-bare-wren-27`.
+- Passed: 4 of 5. Cost of the five runs: $0.23.
+
+### Failed required checks
+
+- `a =# nothing` expected `{'a': ''}`, got `{'a': '# nothing'}` in `20261104T164859Z-ini-subset-parser-bare-birch-26`: **unfair**. This is the same hidden case that a v2 run failed. `docs/FORMAT.md` says an inline comment starts at a `#` that is "the first character of the text or is preceded by whitespace" without saying that for a value "the text" begins after the `=`. Two independent runs under two versions read it the other way, so the sentence is ambiguous.
+
+### Difficulty
+
+Haiku passed 4 of 5; the one failure is the ambiguous case above.
+
+- Verdict: rejected
+
+An unfair verdict means the task changes, its version increases and G3 restarts. Version 4 states the meaning of "the text" and both examples in `docs/FORMAT.md`; the grader is unchanged. v4 needs a new pilot.
