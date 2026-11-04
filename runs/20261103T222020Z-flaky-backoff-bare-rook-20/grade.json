@@ -1,0 +1,56 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "policy-doc-unchanged",
+      "passed": true,
+      "detail": "docs/RETRY.md must not change"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "never-exceeds-cap",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "jitter-present-and-symmetric",
+      "passed": true,
+      "detail": "factor range and mean: {'min': 0.9000222005796006, 'max': 1.0998813094798334, 'mean': 0.998966141752791}"
+    },
+    {
+      "name": "capped-delays-in-range",
+      "passed": true,
+      "detail": "at cap: {'min': 34, 'max': 34}"
+    },
+    {
+      "name": "rng-injection-reproducible",
+      "passed": true,
+      "detail": "True"
+    },
+    {
+      "name": "default-source-still-random",
+      "passed": true,
+      "detail": "True"
+    },
+    {
+      "name": "visible-suite-stable",
+      "passed": true,
+      "detail": "failures over 200 runs: 0"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}

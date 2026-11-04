@@ -1,0 +1,73 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..6d80036
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,17 @@
++# Summary
++
++**Root cause:** `compute_delay` applied the cap *before* jitter, so a capped delay could be multiplied by up to `1 + jitter` (1.1) and exceed `cap`. That violates `docs/RETRY.md` ("no delay may ever exceed `cap`"). `test_schedule_respects_cap` uses cap=34, max_attempts=7: attempt 7 is 32s, and ±10% jitter pushes it over 34 about a quarter of the time. This was a real bug in the library, not a bad test.
++
++**Changes**
++- `retrykit/backoff.py`: compute base*2^(attempt-1), apply jitter, then clamp to `[0, cap]`. Jitter stays on, as the policy requires.
++- `tests/test_cap_deterministic.py` (new): uses a stub rng that always returns the maximum jitter factor. This checks the cap deterministically for `compute_delay` and `Retrier.schedule`, and checks that jitter is still applied below the cap. No existing tests were edited.
++
++**Verified**
++- `python -m unittest discover -s tests -t .`: 7 tests, OK.
++- Ran `python -m unittest tests.test_backoff` 300 times after the fix: 0 failures.
++- Confirmed by arithmetic (not by running the old code) that the old logic gives 37.4 > 34 under max jitter, so the new tests would fail on the old code. I did not run them against the old code, because a stash command was blocked.
++
++**Not verified / notes**
++- I did not reproduce the roughly 1-in-4 failure rate on the old code before fixing it. The failure rate is inferred from the analysis.
++- Behavior change: delays near the cap now cluster at exactly `cap`, with less jitter spread at the cap. This follows from the policy's hard cap.
++- Nothing outside `retrykit/` and `tests/` needed changes.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..26a874f 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    # Clamp after jitter: no delay may ever exceed cap (docs/RETRY.md).
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_cap_deterministic.py b/tests/test_cap_deterministic.py
+new file mode 100644
+index 0000000..6861b98
+--- /dev/null
++++ b/tests/test_cap_deterministic.py
+@@ -0,0 +1,27 @@
++import unittest
++
++from retrykit import Retrier, compute_delay
++
++
++class MaxJitterRng:
++    """Always returns the top of the range: worst case for the cap."""
++
++    def uniform(self, a, b):
++        return b
++
++
++class CapWithWorstCaseJitter(unittest.TestCase):
++    def test_compute_delay_never_exceeds_cap(self):
++        for attempt in range(1, 15):
++            self.assertLessEqual(compute_delay(attempt, base=0.5, cap=34, rng=MaxJitterRng()), 34)
++
++    def test_schedule_never_exceeds_cap(self):
++        r = Retrier(base=0.5, cap=34, max_attempts=10, rng=MaxJitterRng())
++        self.assertTrue(all(d <= 34 for d in r.schedule()))
++
++    def test_jitter_still_applied_below_cap(self):
++        self.assertAlmostEqual(compute_delay(1, base=1, cap=100, jitter=0.1, rng=MaxJitterRng()), 1.1)
++
++
++if __name__ == "__main__":
++    unittest.main()

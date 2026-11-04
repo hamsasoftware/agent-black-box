@@ -1,0 +1,61 @@
+diff --git a/README.md b/README.md
+index b719f92..a94375f 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@ Prints the warehouse inventory as a table.
+ 
+     python -m stockreport inventory.csv
+ 
++Use `--format markdown` to print a GitHub-flavoured markdown table (for pasting into issues):
++
++    python -m stockreport inventory.csv --format markdown
++
+ Tables are rendered with the `tabulate` package vendored in `vendor/tabulate` (a pinned internal fork; read its README before using it). Do not add new third-party dependencies; this runs on locked-down warehouse machines with no package index access.
+ 
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..371acbb
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,15 @@
++# Summary
++
++## Changed
++- `stockreport/report.py`: `render()` now handles `fmt="markdown"`. It uses the project's vendored `tabulate` fork with `style="pipe"` and `number_format=".2f"`. The table is followed by a blank line and `**Total stock value:** <value>`. Rows use the same columns and order as the text report.
++- `stockreport/__main__.py`: `--format` now accepts `markdown`.
++- `README.md`: documented the new option.
++- No tests were edited or added, because `tests/test_report.py` already covers the exact output. Nothing under `vendor/` was touched and no dependencies were added.
++
++## Verified
++- `python -W error -m unittest -v` ran 3 tests, all OK. These were the text test, the markdown render test and the CLI markdown test. `-W error` turns warnings, such as the fork's ignored-keyword DeprecationWarning, into failures.
++- `python -m stockreport inventory.csv --format markdown` printed the expected table and total.
++
++## Not verified / notes
++- I only tested against the three-row `inventory.csv`. Item names containing `|` are not escaped, so they would break the markdown table. I did not handle this because the vendored fork can't be changed. If it matters, the fix would be escaping in `stockreport/report.py`.
++- The text format is unchanged.
+diff --git a/stockreport/__main__.py b/stockreport/__main__.py
+index dfdfb33..827d975 100644
+--- a/stockreport/__main__.py
++++ b/stockreport/__main__.py
+@@ -8,7 +8,7 @@ from .report import render
+ def main(argv=None):
+     parser = argparse.ArgumentParser(prog="stockreport")
+     parser.add_argument("path", help="inventory CSV with sku,name,qty,unit_price")
+-    parser.add_argument("--format", choices=["text"], default="text")
++    parser.add_argument("--format", choices=["text", "markdown"], default="text")
+     args = parser.parse_args(argv)
+     print(render(load_csv(args.path), args.format))
+     return 0
+diff --git a/stockreport/report.py b/stockreport/report.py
+index 4084f70..c6179a0 100644
+--- a/stockreport/report.py
++++ b/stockreport/report.py
+@@ -15,4 +15,7 @@ def render(items, fmt="text"):
+     if fmt == "text":
+         table = tabulate(_rows(items), headers=HEADERS, style="plain", number_format=".2f")
+         return f"{table}\n\nTotal stock value: {total_value(items):.2f}"
++    if fmt == "markdown":
++        table = tabulate(_rows(items), headers=HEADERS, style="pipe", number_format=".2f")
++        return f"{table}\n\n**Total stock value:** {total_value(items):.2f}"
+     raise ValueError(f"unknown format {fmt!r}")

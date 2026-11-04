@@ -1,0 +1,184 @@
+diff --git a/README.md b/README.md
+index 20a87b4..f6963d3 100644
+--- a/README.md
++++ b/README.md
+@@ -6,6 +6,12 @@ Small command-line tool the ops team uses to summarise event logs exported from
+ 
+ prints one line per service and level with the number of events, then a total.
+ 
++To look at recent events only, add `--since`:
++
++    python -m evlog report events.jsonl --since 2024-03-10
++
++It takes an ISO date or datetime and counts events at or after it. A bare date means midnight UTC, and a value without an offset is treated as UTC, like legacy timestamps. Events are compared as real instants, so other UTC offsets are placed correctly.
++
+ Each line of an events file is a JSON object:
+ 
+     {"ts": "2024-03-09T23:30:00-05:00", "service": "api", "level": "error", "msg": "upstream timeout"}
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..7b82f5c
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,16 @@
++# Summary
++
++## Changed
++- `evlog/events.py`: new `parse_timestamp` (ISO parse; naive values are treated as UTC, per the README, so every timestamp is timezone-aware). `count_events` takes an optional `since` and keeps events with `ts >= since`.
++- `evlog/cli.py`: `report --since WHEN`. It accepts an ISO date or datetime. A bare date means midnight UTC, and the boundary is inclusive. An invalid value gives an argparse error (exit 2, no traceback). I also made an unreadable file or malformed event line print a one-line error and exit 1 instead of a traceback.
++- `README.md`: documented `--since`.
++- `tests/test_since.py` (new): boundary and offset handling, bad `--since` value, missing file. No existing tests were touched.
++
++## Verified
++- `python -m unittest`: 6 tests, all OK. This includes the teammate's `test_since_excludes_older_days`.
++- `python -m evlog report /dev/null --since foo` printed a clear error. `python -m evlog report x.jsonl` (missing file) printed "cannot read". `--since 2024-03-10` on an empty file printed `total 0`.
++
++## Not verified / caveats
++- I did not test malformed event lines (bad JSON or missing keys) with a test. The code path exists but only the missing-file case is covered.
++- Dates are interpreted as UTC, not the operator's local time. Ops in other zones may expect local midnight.
++- `datetime.fromisoformat` accepts different formats depending on the Python version (for example a trailing `Z`). I did not check this across versions.
+diff --git a/evlog/cli.py b/evlog/cli.py
+index d8dccaf..535977a 100644
+--- a/evlog/cli.py
++++ b/evlog/cli.py
+@@ -1,7 +1,17 @@
+ import argparse
+ import sys
+ 
+-from .events import count_events, read_events
++from .events import count_events, parse_timestamp, read_events
++
++
++def since_arg(text):
++    try:
++        return parse_timestamp(text)
++    except ValueError:
++        raise argparse.ArgumentTypeError(
++            f"invalid --since value {text!r}: expected an ISO date or datetime, "
++            "e.g. 2024-03-10 or 2024-03-10T12:00:00+00:00"
++        )
+ 
+ 
+ def build_parser():
+@@ -9,6 +19,12 @@ def build_parser():
+     commands = parser.add_subparsers(dest="command", required=True)
+     report = commands.add_parser("report", help="count events per service and level")
+     report.add_argument("path", help="events file (JSON lines)")
++    report.add_argument(
++        "--since",
++        type=since_arg,
++        metavar="WHEN",
++        help="only count events at or after this ISO date/datetime (naive values are UTC)",
++    )
+     return parser
+ 
+ 
+@@ -22,6 +38,13 @@ def main(argv=None, out=None):
+     out = out or sys.stdout
+     args = build_parser().parse_args(argv)
+     if args.command == "report":
+-        counts = count_events(read_events(args.path))
++        try:
++            counts = count_events(read_events(args.path), since=args.since)
++        except OSError as exc:
++            print(f"evlog: cannot read {args.path}: {exc.strerror}", file=sys.stderr)
++            return 1
++        except (ValueError, KeyError) as exc:
++            print(f"evlog: bad event data in {args.path}: {exc!r}", file=sys.stderr)
++            return 1
+         print(render(counts), file=out)
+     return 0
+diff --git a/evlog/events.py b/evlog/events.py
+index f5b9d64..a9cabda 100644
+--- a/evlog/events.py
++++ b/evlog/events.py
+@@ -1,7 +1,7 @@
+ import json
+ from collections import Counter
+ from dataclasses import dataclass
+-from datetime import datetime
++from datetime import datetime, timezone
+ 
+ 
+ @dataclass(frozen=True)
+@@ -12,10 +12,18 @@ class Event:
+     msg: str = ""
+ 
+ 
++def parse_timestamp(text):
++    """Parse an ISO timestamp; naive values are UTC. Always returns an aware datetime."""
++    ts = datetime.fromisoformat(text)
++    if ts.tzinfo is None:
++        ts = ts.replace(tzinfo=timezone.utc)
++    return ts
++
++
+ def parse_line(line):
+     raw = json.loads(line)
+     return Event(
+-        ts=datetime.fromisoformat(raw["ts"]),
++        ts=parse_timestamp(raw["ts"]),
+         service=raw["service"],
+         level=raw["level"],
+         msg=raw.get("msg", ""),
+@@ -29,5 +37,7 @@ def read_events(path):
+                 yield parse_line(line)
+ 
+ 
+-def count_events(events):
++def count_events(events, since=None):
++    if since is not None:
++        events = (event for event in events if event.ts >= since)
+     return Counter((event.service, event.level) for event in events)
+diff --git a/tests/test_since.py b/tests/test_since.py
+new file mode 100644
+index 0000000..2af8291
+--- /dev/null
++++ b/tests/test_since.py
+@@ -0,0 +1,46 @@
++import contextlib
++import io
++import os
++import tempfile
++import unittest
++
++from evlog.cli import main
++
++
++class SinceTest(unittest.TestCase):
++    def setUp(self):
++        handle, self.path = tempfile.mkstemp(suffix=".jsonl")
++        with os.fdopen(handle, "w") as f:
++            f.write('{"ts": "2024-03-09T23:30:00-05:00", "service": "a", "level": "x"}\n')
++            f.write('{"ts": "2024-03-10 00:00:00", "service": "a", "level": "x"}\n')
++            f.write('{"ts": "2024-03-09 23:59:59", "service": "a", "level": "x"}\n')
++
++    def tearDown(self):
++        os.unlink(self.path)
++
++    def run_cli(self, *args):
++        out = io.StringIO()
++        main(["report", self.path, *args], out=out)
++        return out.getvalue().strip().splitlines()
++
++    def test_boundary_is_midnight_utc_inclusive(self):
++        # 23:30-05:00 on the 9th is 04:30 UTC on the 10th: included.
++        self.assertEqual(self.run_cli("--since", "2024-03-10"), ["a x 2", "total 2"])
++
++    def test_since_datetime_with_offset(self):
++        self.assertEqual(self.run_cli("--since", "2024-03-10T05:00:00+00:00"), ["total 0"])
++
++    def test_bad_since_is_clean_error(self):
++        err = io.StringIO()
++        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
++            main(["report", self.path, "--since", "yesterday"])
++        self.assertEqual(cm.exception.code, 2)
++        self.assertIn("invalid --since value", err.getvalue())
++        self.assertNotIn("Traceback", err.getvalue())
++
++    def test_missing_file_is_clean_error(self):
++        err = io.StringIO()
++        with contextlib.redirect_stderr(err):
++            code = main(["report", self.path + ".nope"])
++        self.assertEqual(code, 1)
++        self.assertIn("cannot read", err.getvalue())

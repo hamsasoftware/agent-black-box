@@ -1,0 +1,101 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..084c3a7
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Summary: flaky `test_schedule_respects_cap`
++
++## Root cause
++`compute_delay` in `retrykit/backoff.py` clamped to `cap` *before* applying jitter. `docs/RETRY.md` step 3 requires the clamp to come *after* jitter so that no delay ever exceeds `cap`. With the test's parameters (`base=0.5, cap=34, max_attempts=7`), the 7th delay is `32 * U(0.9, 1.1)`, which can reach 35.2 and break the cap. The test draws from an unseeded RNG, so it failed intermittently.
++
++I measured the violation rate on the original code at about 18.7% of schedules (10,000 samples), which matches the one-in-four CI failure rate.
++
++## What I changed
++- `retrykit/backoff.py`: `compute_delay` now computes `base * 2**(attempt-1)`, applies jitter, and then clamps to `[0, cap]`. This follows the policy in `docs/RETRY.md`.
++- `tests/test_backoff_policy.py` (new file): four deterministic tests. They cover the cap under maximum positive jitter, the capped value being exactly `cap` at max jitter, the cap holding across 2,000 seeded schedules, and jitter bounds below the cap. No existing test was edited or deleted.
++
++## Verification
++- `python -m unittest -v` on the fixed code: all 8 tests pass (4 existing, 4 new in `test_backoff_policy`).
++- Ran the new policy tests against the original `backoff.py` (copied from `git show HEAD:` into a temp directory): 3 of 4 fail with `AssertionError`, confirming they catch the bug.
++- Measured cap violations over 100,000 schedules with the fix: 0 (before: about 18.7%).
++
++## Not verified / open items
++- **CI configuration is not in this repo.** I found no `.github/` or other CI config, so I could not check the pipeline itself. The fix is verified locally only; I have not confirmed that CI now goes green.
++- **Possible off-by-one in `Retrier.run` (not changed, out of scope for the flake):** `run` sleeps between attempts for each entry in `schedule()` and then makes one final call outside the `try`. With `max_attempts=5`, that is up to 6 calls to `fn`, not 5. `docs/RETRY.md` does not define `max_attempts`, so I left this alone. Someone should decide whether it is intended.
++- `docs/RETRY.md` says jitter is mandatory, but the default `jitter` is applied via `rng` and `Retrier` passes `rng=None` to the global `random` module. Tests that want reproducible schedules must pass `rng=`. I did not change this.
++- The `[0, cap]` clamp uses `max(0.0, ...)`. With `jitter` greater than 1 the factor could go negative, and that is now clamped to 0. I did not test jitter values above 1.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..1a8c832 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    # Clamp last, after jitter: docs/RETRY.md requires no delay to exceed cap.
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_backoff_policy.py b/tests/test_backoff_policy.py
+new file mode 100644
+index 0000000..69a038e
+--- /dev/null
++++ b/tests/test_backoff_policy.py
+@@ -0,0 +1,51 @@
++"""Deterministic checks of the retry policy in docs/RETRY.md."""
++
++import random
++import unittest
++
++from retrykit import Retrier, compute_delay
++
++
++class _MaxJitterRng:
++    """Always returns the top of the jitter range: uniform(a, b) -> b."""
++
++    def uniform(self, a, b):
++        return b
++
++
++class _MinJitterRng:
++    def uniform(self, a, b):
++        return a
++
++
++class BackoffPolicyTest(unittest.TestCase):
++    def test_cap_holds_under_maximum_positive_jitter(self):
++        # Uncapped attempt 7 is 32s; 32 * 1.1 = 35.2 used to escape cap=34.
++        retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=_MaxJitterRng())
++        self.assertLessEqual(max(retrier.schedule()), 34)
++
++    def test_capped_delay_is_exactly_cap_at_max_jitter(self):
++        self.assertEqual(
++            compute_delay(10, base=0.5, cap=30.0, jitter=0.1, rng=_MaxJitterRng()), 30.0
++        )
++
++    def test_cap_holds_across_many_seeds(self):
++        for seed in range(2000):
++            retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(seed))
++            for delay in retrier.schedule():
++                self.assertGreaterEqual(delay, 0)
++                self.assertLessEqual(delay, 34)
++
++    def test_jitter_stays_within_bounds_below_cap(self):
++        # attempt 1 with base 0.5: uncapped 0.5, jitter 0.1 -> [0.45, 0.55].
++        self.assertAlmostEqual(
++            compute_delay(1, base=0.5, jitter=0.1, rng=_MinJitterRng()), 0.45
++        )
++        self.assertAlmostEqual(
++            compute_delay(1, base=0.5, jitter=0.1, rng=_MaxJitterRng()), 0.55
++        )
++
++
++
++if __name__ == "__main__":
++    unittest.main()

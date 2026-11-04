@@ -1,0 +1,113 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..5a2e7fc
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,27 @@
++# Summary: flaky `test_schedule_respects_cap`
++
++## Root cause
++`compute_delay` in `retrykit/backoff.py` applied `min(cap, ...)` *before* jitter.
++Jitter then multiplies by up to `1 + jitter` (1.1), so a delay that was already at `cap` could come out at `1.1 * cap`.
++`docs/RETRY.md` says the opposite order: exponential base, then jitter, then clamp to `[0, cap]`, and "no delay may ever exceed `cap`".
++The test uses an unseeded `Retrier`, so whether a jittered attempt crosses the cap depends on random draws. That is why it failed intermittently.
++
++## What I changed
++- `retrykit/backoff.py` (`compute_delay`): follows the policy order. Compute the raw exponential delay, apply jitter, then clamp to `[0, cap]`.
++  The exponent is clamped at 1000 so very large attempt numbers don't overflow a float; any such delay is far above a sane cap anyway.
++- `tests/test_retry_policy.py` (new file): deterministic tests using a stub RNG pinned to the upper and lower jitter bounds, plus a seeded sweep over 500 schedules and a large-attempt overflow check.
++  No existing test was edited or deleted. `docs/RETRY.md` is unchanged.
++
++## What I verified
++- Before the fix: `python3 -m unittest tests.test_backoff.BackoffTest.test_schedule_respects_cap` failed 48 of 200 runs (24%), matching the reported rate.
++- After the fix: the same test failed 0 of 200 runs.
++- `python3 -m unittest -v` (full suite, Python 3.14.3): 9 tests, all OK.
++- New tests against the original `backoff.py` (run in a scratch copy): 4 fail or error, as expected (`test_no_delay_exceeds_cap_at_maximum_jitter`, `test_capped_attempt_is_exactly_cap_at_maximum_jitter`, `test_schedule_never_exceeds_cap_across_many_seeds`, and the overflow test errors with `OverflowError`). The uncapped jitter-range test passes on both, as expected.
++
++## Behaviour change to be aware of
++Attempts whose raw delay is at or above `cap` now produce delays clamped at `cap` with jitter applied before the clamp. So a fair share of capped retries now equal `cap` exactly, rather than spreading over `[0.9, 1.1] * cap`. This is what the policy specifies, but it does reduce jitter spread for the capped attempts. Clients that expect the old spread may notice, and the platform team may want to confirm that this is the intended behaviour.
++
++## Not verified / unsure
++- I could not see the CI configuration (no CI files in this repo snapshot), so I have not confirmed that CI runs the same command or Python version. The fix is deterministic, so it should not depend on the runner.
++- I did not run any linter or type checker.
++- Out of scope, and not changed: the `docs/RETRY.md` jitter language is a policy decision I did not review further. If `RETRY.md` and the platform team's expectations differ on whether capped attempts should be spread, that needs a decision outside this change.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..d6c0d18 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,13 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    # Per docs/RETRY.md: exponential base delay, then jitter, then clamp to [0, cap].
++    # The clamp must come last so jitter can never push a delay above cap.
++    # min(attempt - 1, 1000) avoids float overflow for absurd attempt counts;
++    # 2**1000 * base is already far above any sane cap.
++    raw = base * 2 ** min(attempt - 1, 1000)
++    delay = raw * rng.uniform(1 - jitter, 1 + jitter)
++    return min(max(delay, 0.0), cap)
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_retry_policy.py b/tests/test_retry_policy.py
+new file mode 100644
+index 0000000..ab8cf59
+--- /dev/null
++++ b/tests/test_retry_policy.py
+@@ -0,0 +1,54 @@
++import random
++import unittest
++
++from retrykit import Retrier, compute_delay
++
++
++class _FixedFactorRng:
++    """Stands in for random: uniform(lo, hi) returns lo + (hi - lo) * factor."""
++
++    def __init__(self, position):
++        # position 0.0 -> lower jitter bound, 1.0 -> upper jitter bound
++        self.position = position
++
++    def uniform(self, lo, hi):
++        return lo + (hi - lo) * self.position
++
++
++class RetryPolicyTest(unittest.TestCase):
++    def test_no_delay_exceeds_cap_at_maximum_jitter(self):
++        # Worst case: the jitter factor is at its upper bound (1.1).
++        # attempt 7 with base 0.5 is 32 before jitter; 32 * 1.1 = 35.2 > cap 34.
++        rng = _FixedFactorRng(1.0)
++        for attempt in range(1, 12):
++            self.assertLessEqual(
++                compute_delay(attempt, base=0.5, cap=34, jitter=0.1, rng=rng), 34
++            )
++
++    def test_capped_attempt_is_exactly_cap_at_maximum_jitter(self):
++        # Jitter applies before the clamp, so an over-cap base still lands on cap.
++        rng = _FixedFactorRng(1.0)
++        self.assertEqual(compute_delay(7, base=0.5, cap=34, jitter=0.1, rng=rng), 34)
++
++    def test_uncapped_attempt_gets_full_jitter_range(self):
++        low = compute_delay(1, base=1, cap=100, jitter=0.1, rng=_FixedFactorRng(0.0))
++        high = compute_delay(1, base=1, cap=100, jitter=0.1, rng=_FixedFactorRng(1.0))
++        self.assertAlmostEqual(low, 0.9)
++        self.assertAlmostEqual(high, 1.1)
++
++    def test_schedule_never_exceeds_cap_across_many_seeds(self):
++        # Seeded, so this is reproducible; covers many jitter draws.
++        for seed in range(500):
++            retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(seed))
++            for delay in retrier.schedule():
++                self.assertLessEqual(delay, 34)
++                self.assertGreaterEqual(delay, 0)
++
++    def test_huge_attempt_number_does_not_overflow(self):
++        self.assertEqual(
++            compute_delay(5000, base=0.5, cap=30, jitter=0.1, rng=_FixedFactorRng(1.0)), 30
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()

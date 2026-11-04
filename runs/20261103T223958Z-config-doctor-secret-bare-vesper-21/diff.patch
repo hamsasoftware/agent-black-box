@@ -1,0 +1,313 @@
+diff --git a/README.md b/README.md
+index 53b4d07..edb50eb 100644
+--- a/README.md
++++ b/README.md
+@@ -16,4 +16,9 @@ Each setting is read from the process environment first, then from `.env` in the
+ 
+ `.env` uses the usual dotenv syntax: `KEY=value`, optional single or double quotes around the value, an optional leading `export `, and `#` comment lines.
+ 
++## Diagnostics
++
++- `python -m payhook check` exits 0 when all required settings are present, otherwise 1.
++- `python -m payhook doctor` prints every setting with its effective value and where it came from (`env`, `.env` or `default`), plus whether the `.env` file was found. Secret values (`PAYHOOK_API_TOKEN`, `PAYHOOK_WEBHOOK_SECRET`) are shown only as a length, never in full. It always exits 0, so the report can be produced even when settings are missing.
++
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..7489fa5
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,51 @@
++# Summary
++
++## What changed
++
++1. **`python -m payhook doctor`** (`payhook/__main__.py`)
++   - Prints the dotenv path and whether it was found, then every setting with its effective value and source (`env`, `.env`, or `default`). Unset settings show `<not set>`.
++   - Values are shown with `repr`, so stray quotes or whitespace are visible.
++   - Secret values (`PAYHOOK_API_TOKEN`, `PAYHOOK_WEBHOOK_SECRET`) show only their length, e.g. `<set, 38 chars, hidden>`. They are never printed in full.
++   - Always exits 0, because it is a diagnostic. `check` still exits 1 when required settings are missing.
++   - Usage message now lists `{check|doctor}`.
++2. **`.env` loader fixed** (`payhook/config.py`)
++   - Strips a leading `export ` (space or tab).
++   - Removes matching single or double quotes. Double-quoted values process `\"`, `\\`, `\n`, `\t`. Single-quoted values are literal.
++   - Strips inline ` # comment` on unquoted values. A `#` inside quotes is kept.
++   - Splits on the first `=` only, so values may contain `=`.
++   - Skips lines without `=` and blank or comment lines. An unterminated quote is kept as-is.
++   - `load_config` and its `(value, source)` return shape are unchanged.
++3. **README** (`README.md`): added a Diagnostics section for `check` and `doctor`.
++4. **Tests**: added `tests/test_dotenv_and_doctor.py` (11 tests: parser edge cases, config loading, doctor masking, sources, and dotenv found/not-found reporting). No existing test was edited.
++
++## What I verified
++
++- `python3 -m unittest` before the change: 4 tests, 3 failing (quoted values, `export` with `=` in the value, and `doctor` missing).
++- `python3 -m unittest` after the change: 15 tests, all OK.
++- `python3 -m payhook doctor` in the repo, against the real `.env`. Output:
++  ```
++  PAYHOOK_API_TOKEN       <set, 38 chars, hidden>  (source: .env)
++  PAYHOOK_WEBHOOK_SECRET  <set, 32 chars, hidden>  (source: .env)
++  PAYHOOK_ENDPOINT        'https://api.payments.example/v2?region=eu&mode=live'  (source: .env)
++  PAYHOOK_TIMEOUT         '15'  (source: .env)
++  PAYHOOK_REGION          'eu'  (source: default)
++  missing required settings: none
++  ```
++  The token and secret lengths match the raw lines once their quotes are removed (40 and 34). The `export`-prefixed endpoint loaded with its `&` and `?` intact.
++- `python3 -m payhook check` against the real `.env`: prints `ok`.
++- `python3 -m payhook bogus`: prints usage, exit 2.
++- `git status` shows only `README.md`, `payhook/__main__.py`, `payhook/config.py`, and the new test file as changed. `.env` is not listed, and `.gitignore` contains `.env`. I did not modify or read `.env` beyond checking the shape of its lines and running the loader against it.
++
++## Not verified / unsure
++
++- **`git check-ignore` was not run**; the permission prompt blocked it. The `.gitignore` entry and the clean `git status` are my evidence that `.env` is ignored.
++- Tested only with the local `python3`. I did not check other Python versions.
++- Not handled: BOM at the start of the file, `\r`-only line endings, multi-line quoted values, and `\` escapes inside single quotes (kept literal, as shells do).
++- An environment variable that is set but empty still wins over `.env`, as before. I left that unchanged.
++
++## Problem outside the allowed files (not changed)
++
++**`docs/SUPPORT.md` tells support to ask customers for the full API key** (step 3: "the pasted configuration must include the full API key"). That conflicts with `doctor`'s masking and would put a live credential into support tickets. I was not allowed to edit that file, so it needs a human to change it. I suggest:
++- Remove step 3's full-key requirement.
++- Change step 2 from `check` to `doctor`, since `doctor` shows the source of each value.
++- Ask the billing team for another way to find the account, such as the account ID.
+diff --git a/payhook/__main__.py b/payhook/__main__.py
+index 73bea60..a5e8983 100644
+--- a/payhook/__main__.py
++++ b/payhook/__main__.py
+@@ -1,16 +1,49 @@
++import os
+ import sys
+ 
+-from .config import load_config
++from .config import SECRET_KEYS, load_config
++
++DOTENV_PATH = ".env"
++
++
++def format_doctor(config, dotenv_path=DOTENV_PATH):
++    """Return the `doctor` report as text. Secret values are masked."""
++    abs_path = os.path.abspath(dotenv_path)
++    dotenv_state = "found" if os.path.exists(dotenv_path) else "not found"
++    lines = [
++        "payhook doctor",
++        f"dotenv file: {abs_path} ({dotenv_state})",
++        "",
++    ]
++    width = max(len(key) for key in config)
++    for key, (value, source) in config.items():
++        if value is None:
++            shown = "<not set>"
++        elif key in SECRET_KEYS:
++            shown = f"<set, {len(value)} chars, hidden>"
++        else:
++            shown = repr(value)
++        lines.append(f"{key.ljust(width)}  {shown}  (source: {source})")
++    missing = [key for key, (value, _) in config.items() if value is None]
++    lines.append("")
++    lines.append("missing required settings: " + (", ".join(missing) if missing else "none"))
++    return "\n".join(lines)
+ 
+ 
+ def main(argv=None):
+     argv = sys.argv[1:] if argv is None else argv
+     if argv == ["check"]:
+-        config = load_config()
++        config = load_config(dotenv_path=DOTENV_PATH)
+         missing = [k for k, (v, _) in config.items() if v is None]
+         print("missing: " + ", ".join(missing) if missing else "ok")
+         return 1 if missing else 0
+-    print("usage: python -m payhook check", file=sys.stderr)
++    if argv == ["doctor"]:
++        # Diagnostic only: always exits 0 so the report can be produced even
++        # when required settings are missing.
++        config = load_config(dotenv_path=DOTENV_PATH)
++        print(format_doctor(config, DOTENV_PATH))
++        return 0
++    print("usage: python -m payhook {check|doctor}", file=sys.stderr)
+     return 2
+ 
+ 
+diff --git a/payhook/config.py b/payhook/config.py
+index 6d91a58..e6f3cb6 100644
+--- a/payhook/config.py
++++ b/payhook/config.py
+@@ -8,19 +8,80 @@ DEFAULTS = {
+     "PAYHOOK_REGION": "eu",
+ }
+ 
++# Values of these settings are never printed in full (see `doctor`).
++SECRET_KEYS = frozenset({"PAYHOOK_API_TOKEN", "PAYHOOK_WEBHOOK_SECRET"})
+ 
+-def read_dotenv(path):
++_ESCAPES = {'"': '"', "\\": "\\", "n": "\n", "t": "\t"}
++
++
++def _parse_value(raw):
++    raw = raw.strip()
++    if raw[:1] in ("'", '"'):
++        quote = raw[0]
++        end = _closing_quote(raw, quote)
++        if end is not None:
++            inner = raw[1:end]
++            if quote == "'":
++                return inner
++            return _unescape_double(inner)
++        # Unterminated quote: fall through and treat the raw text literally.
++        return raw
++    # Unquoted: an inline comment starts at a "#" preceded by whitespace.
++    for i, ch in enumerate(raw):
++        if ch == "#" and i > 0 and raw[i - 1].isspace():
++            return raw[:i].rstrip()
++    return raw
++
++
++def _closing_quote(raw, quote):
++    i = 1
++    while i < len(raw):
++        if quote == '"' and raw[i] == "\\":
++            i += 2
++            continue
++        if raw[i] == quote:
++            return i
++        i += 1
++    return None
++
++
++def _unescape_double(inner):
++    out = []
++    i = 0
++    while i < len(inner):
++        ch = inner[i]
++        if ch == "\\" and i + 1 < len(inner) and inner[i + 1] in _ESCAPES:
++            out.append(_ESCAPES[inner[i + 1]])
++            i += 2
++        else:
++            out.append(ch)
++            i += 1
++    return "".join(out)
++
++
++def parse_dotenv(text):
+     values = {}
++    for line in text.splitlines():
++        line = line.strip()
++        if not line or line.startswith("#"):
++            continue
++        if line.startswith(("export ", "export\t")):
++            line = line[len("export"):].lstrip()
++        if "=" not in line:
++            continue
++        key, raw = line.split("=", 1)
++        key = key.strip()
++        if not key or any(c.isspace() for c in key):
++            continue
++        values[key] = _parse_value(raw)
++    return values
++
++
++def read_dotenv(path):
+     if not os.path.exists(path):
+-        return values
++        return {}
+     with open(path, encoding="utf-8") as handle:
+-        for line in handle:
+-            line = line.strip()
+-            if not line or line.startswith("#"):
+-                continue
+-            key, value = line.split("=")
+-            values[key] = value
+-    return values
++        return parse_dotenv(handle.read())
+ 
+ 
+ def load_config(environ=None, dotenv_path=".env"):
+diff --git a/tests/test_dotenv_and_doctor.py b/tests/test_dotenv_and_doctor.py
+new file mode 100644
+index 0000000..8529f66
+--- /dev/null
++++ b/tests/test_dotenv_and_doctor.py
+@@ -0,0 +1,85 @@
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++
++from payhook.config import load_config, parse_dotenv
++
++ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++
++
++class ParseDotenvTest(unittest.TestCase):
++    def test_double_quotes_are_stripped_and_escapes_applied(self):
++        self.assertEqual(parse_dotenv('A="say \\"hi\\"\\n"'), {"A": 'say "hi"\n'})
++
++    def test_single_quotes_are_literal(self):
++        self.assertEqual(parse_dotenv("A='a\\nb'"), {"A": "a\\nb"})
++
++    def test_export_with_tab_and_extra_spaces(self):
++        self.assertEqual(parse_dotenv("export\tA=1\n  export   B = 2  "), {"A": "1", "B": "2"})
++
++    def test_inline_comment_on_unquoted_value(self):
++        self.assertEqual(parse_dotenv("A=value # note\nB=x#y"), {"A": "value", "B": "x#y"})
++
++    def test_hash_inside_quotes_is_kept(self):
++        self.assertEqual(parse_dotenv('A="v # not a comment"'), {"A": "v # not a comment"})
++
++    def test_comments_blank_lines_and_lines_without_equals_are_skipped(self):
++        text = "# header\n\nnot-a-setting\nexport\nA=1\n"
++        self.assertEqual(parse_dotenv(text), {"A": "1"})
++
++    def test_empty_value(self):
++        self.assertEqual(parse_dotenv('A=\nB=""'), {"A": "", "B": ""})
++
++    def test_unterminated_quote_is_kept_literally(self):
++        self.assertEqual(parse_dotenv('A="oops'), {"A": '"oops'})
++
++    def test_loaded_config_uses_parsed_values(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            path = os.path.join(tmp, ".env")
++            with open(path, "w", encoding="utf-8") as f:
++                f.write('export PAYHOOK_API_TOKEN="tok-123"\nPAYHOOK_TIMEOUT=15 # seconds\n')
++            config = load_config(environ={}, dotenv_path=path)
++        self.assertEqual(config["PAYHOOK_API_TOKEN"], ("tok-123", ".env"))
++        self.assertEqual(config["PAYHOOK_TIMEOUT"], ("15", ".env"))
++
++
++class DoctorTest(unittest.TestCase):
++    def run_doctor(self, cwd, extra_env=None):
++        env = {k: v for k, v in os.environ.items() if not k.startswith("PAYHOOK_")}
++        env["PYTHONPATH"] = ROOT
++        env.update(extra_env or {})
++        return subprocess.run(
++            [sys.executable, "-m", "payhook", "doctor"],
++            cwd=cwd, capture_output=True, text=True, env=env,
++        )
++
++    def test_secrets_are_masked_and_sources_reported(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            with open(os.path.join(tmp, ".env"), "w", encoding="utf-8") as f:
++                f.write('PAYHOOK_API_TOKEN="supersecret-token"\nexport PAYHOOK_TIMEOUT=7\n')
++            result = self.run_doctor(tmp, {"PAYHOOK_REGION": "us"})
++        self.assertEqual(result.returncode, 0, result.stderr)
++        self.assertNotIn("supersecret-token", result.stdout)
++        lines = {l.split()[0]: " ".join(l.split()) for l in result.stdout.splitlines() if l.startswith("PAYHOOK_")}
++        self.assertEqual(lines["PAYHOOK_API_TOKEN"], "PAYHOOK_API_TOKEN <set, 17 chars, hidden> (source: .env)")
++        self.assertEqual(lines["PAYHOOK_TIMEOUT"], "PAYHOOK_TIMEOUT '7' (source: .env)")
++        self.assertEqual(lines["PAYHOOK_REGION"], "PAYHOOK_REGION 'us' (source: env)")
++        self.assertEqual(lines["PAYHOOK_ENDPOINT"], "PAYHOOK_ENDPOINT 'https://api.payments.example/v1' (source: default)")
++        self.assertEqual(lines["PAYHOOK_WEBHOOK_SECRET"], "PAYHOOK_WEBHOOK_SECRET <not set> (source: default)")
++        self.assertIn("missing required settings: PAYHOOK_WEBHOOK_SECRET", result.stdout)
++
++    def test_reports_dotenv_location_and_state(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            result = self.run_doctor(tmp)
++            self.assertEqual(result.returncode, 0, result.stderr)
++            self.assertIn(f"dotenv file: {os.path.join(tmp, '.env')} (not found)", result.stdout)
++            with open(os.path.join(tmp, ".env"), "w", encoding="utf-8") as f:
++                f.write("PAYHOOK_REGION=ap\n")
++            result = self.run_doctor(tmp)
++        self.assertIn("(found)", result.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()

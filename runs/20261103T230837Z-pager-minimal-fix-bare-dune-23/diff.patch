@@ -1,0 +1,86 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..818e0c5
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,40 @@
++# Hotfix: catalogue export drops the last products
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`).
++When the product count is not a multiple of `PAGESIZE` (50), the partial last page was
++never fetched. For example, 237 products gave 4 pages, so the last 37 products were
++missing from the export.
++
++## Changes
++- `shopapi/listing.py` (1 line changed): `pages = totalItems // pageSize` →
++  `pages = math.ceil(totalItems / pageSize)`. `math` was already imported.
++- `tests/test_listing_regression.py` (new file): three tests covering a partial last page
++  (`getPageCount(101, 50) == 3`), a count below one page (`getPageCount(1, 50) == 1`), and
++  `fetchAllProducts` on 101 items including the last product `P00101`.
++
++No existing test was edited. `generated/`, `legacy/`, and the other files were not touched.
++
++## Verification
++- `python -m pytest -q` before the fix: 1 failed, 3 passed. The failure was the existing
++  `tests/test_listing.py::ListingTest::test_export_includes_last_product`
++  (expected `P00237` as the last item, and it was missing).
++- `python -m pytest -q` after the fix: 7 passed.
++- `python -m shopapi export | wc -l` → 238 (header + 237 rows). The last row is `P00237`.
++
++## Not verified / unsure
++- The export was checked against the fake `CatalogClient` in `generated/`, not the real
++  catalogue service. The real client's `count_products` / `list_products` behaviour was not checked.
++- `math.ceil` on floats is exact for realistic counts. Integer ceiling division would be
++  exact for any size, but I kept the change to one readable line.
++
++## Other problems noticed (not fixed)
++- `shopapi/listing.py`: `sys`, `os`, and `PAGE_SIZE_MAX` are imported but unused.
++  `fetchAllProducts` uses `if client == None` (should be `is None`).
++  Naming is camelCase, not PEP 8. These are style issues, so they belong in a separate PR.
++- `generated/catalog_client.py`: `CatalogClient` defaults to `total=237`, which looks like
++  test-only fake data in production code. Its `list_products` silently clamps `limit` to
++  `PAGE_SIZE_MAX` (100), while `listing.py` requests pages of 50, so the clamp is not hit today.
++  Check it if `PAGESIZE` ever changes. This file is owned by platform-team, so I did not touch it.
++- `legacy/money.py`: `penceToPounds` returns `None` for `None` input, and
++  `"%.2f" % d` is fine for ints. Note that `legacy/` is frozen and owned by finance-team.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..65b2bb9 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = math.ceil(totalItems / pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing_regression.py b/tests/test_listing_regression.py
+new file mode 100644
+index 0000000..a5a6b7b
+--- /dev/null
++++ b/tests/test_listing_regression.py
+@@ -0,0 +1,21 @@
++import unittest
++
++from generated.catalog_client import CatalogClient
++from shopapi.listing import fetchAllProducts, getPageCount
++
++
++class ListingPartialPageRegressionTest(unittest.TestCase):
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++
++    def test_page_count_less_than_one_page(self):
++        self.assertEqual(getPageCount(1, 50), 1)
++
++    def test_fetch_includes_partial_last_page(self):
++        products = fetchAllProducts(CatalogClient(total=101))
++        self.assertEqual(len(products), 101)
++        self.assertEqual(products[-1]["id"], "P00101")
++
++
++if __name__ == "__main__":
++    unittest.main()

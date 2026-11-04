@@ -1,0 +1,56 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..a1d3e06
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,22 @@
++# Hotfix: catalogue export drops the last products
++
++## Changed
++- `shopapi/listing.py` (1 line replaced, 2 lines counted): `getPageCount` used floor division (`totalItems // pageSize`), so any partial final page was dropped. For 237 products it returned 4 pages (200 items), losing the last 37. It now uses `math.ceil(totalItems / pageSize)`. `math` was already imported.
++- `tests/test_listing.py`: added `test_page_count_partial_last_page` (asserts `getPageCount(101, 50) == 3` and `getPageCount(237, 50) == 5`). No existing test was edited or removed.
++
++## Verified
++- Before the fix, `python -m unittest` failed on the existing `test_export_includes_last_product` (`AssertionError` at line 23): the last product was missing.
++- After the fix, `python -m unittest -v` ran 5 tests, all OK, including the existing `test_export_includes_last_product` and the new test.
++- `python -m shopapi export | wc -l` prints 238 lines (header + 237 products), and the last row is `P00237,Product 237,65.58`.
++- `git diff` touches only `shopapi/listing.py` and `tests/test_listing.py`. Nothing under `generated/` or `legacy/` changed.
++- I did not run the new test against the old code with `git stash`. By hand, the old formula gives `101 // 50 == 2`, not 3, so the test would fail there.
++
++## Not verified / unsure
++- Tests use the fake `CatalogClient` in `generated/`. I did not run the export against the real catalogue service.
++- Not checked: `legacy/money.py` `penceToPounds` for edge cases such as single-digit pence. Output looks right for the sample row, but I didn't review the function.
++- Nothing is committed.
++
++## Other problems noticed (not fixed)
++- `fetchAllProducts` calls `count_products()` and then fetches pages in separate requests. If the catalogue changes between those calls, pages can shift, giving duplicates or misses. This is a possible second cause of missing products and needs a separate look.
++- Style only, not for a hotfix: `== None` comparisons, camelCase names mixed with snake_case in the generated client, and `PAGESIZE` (50) separate from the client's `PAGE_SIZE_MAX` (100).
++- No error handling in `fetchAllProducts` or `__main__`: a failed page request crashes the export instead of reporting it.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..65b2bb9 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = math.ceil(totalItems / pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..58aad11 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,10 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++        self.assertEqual(getPageCount(237, 50), 5)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

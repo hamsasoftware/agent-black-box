@@ -1,0 +1,59 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..383f31a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,25 @@
++# Hotfix: catalogue export drops the last products
++
++## Changed
++- `shopapi/listing.py` (1 line): `getPageCount` used floor division, so a partial last page was dropped. For example, 237 products at page size 50 gave 4 pages, so products 201–237 never appeared. It now rounds up: `pages = (totalItems + pageSize - 1) // pageSize`.
++- `tests/test_listing.py` (added one test, `test_page_count_partial_last_page`): asserts `getPageCount(101, 50) == 3` and `getPageCount(237, 50) == 5`. No existing test was edited or deleted.
++
++The existing `test_export_includes_last_product` (237 products, expects `P00237`) was already failing before the change and is now passing.
++
++## Verified
++- Before the fix: `python3 -m pytest -q` gave `1 failed, 3 passed`; the failure was `test_export_includes_last_product`.
++- After the fix: `python3 -m unittest -v` gave `Ran 5 tests ... OK`. `python3 -m pytest -q` gave `5 passed`.
++- `python3 -m shopapi export | wc -l` gives 238 (header plus 237 rows), and the last row is `P00237,Product 237,65.58`.
++- Diff: `shopapi/listing.py` 1 line changed; `tests/test_listing.py` 4 lines added. Within the 6-line limit. `generated/`, `legacy/`, and `OWNERS` untouched.
++
++## Not verified / unsure
++- Tested only against the in-repo `CatalogClient` fake, not the real catalogue service. Paging behaviour against the real API is unconfirmed.
++- I did not read `legacy/money.py` (`penceToPounds`). Price formatting was not checked beyond the one row above.
++- Nothing has been committed.
++
++## Other problems noticed (not fixed)
++- `shopapi/listing.py`: `os` and `math` are imported but unused. `math` was already unused before this change.
++- `shopapi/listing.py`: `PAGESIZE = 50` is independent of the client's `PAGE_SIZE_MAX = 100`. Works, but is a latent coupling.
++- `shopapi/listing.py`: uses `== None` instead of `is None`; style only.
++- Offset-based paging can skip or duplicate products if the catalogue changes during an export. Not addressed.
++- `README.md` says to run tests with `python -m unittest`; that works, but the repo has no pytest config. Fine as is.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..bb60985 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = (totalItems + pageSize - 1) // pageSize
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..58aad11 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,10 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++        self.assertEqual(getPageCount(237, 50), 5)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

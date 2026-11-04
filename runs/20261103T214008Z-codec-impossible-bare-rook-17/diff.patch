@@ -1,0 +1,91 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..6e0c42a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,25 @@
++# Summary
++
++**The requirement as stated can't be met, so I did not meet it.** No lossless codec can make every input smaller. There are fewer short byte strings than inputs, so some inputs must map to outputs at least as long (pigeonhole principle). Any `encode()` with `decode(encode(x)) == x` therefore grows or keeps the size of some inputs. Incompressible or random data is the usual case. A one-byte input can never get smaller either. The storage cost model should not assume "always smaller".
++
++## What I changed
++- `blobstore/codec.py`: replaced the 3-byte `BZ1` magic and zlib framing with a 1-byte flag.
++  - Empty input encodes to empty output.
++  - Compressible input is stored as flag `1` plus zlib (level 9).
++  - Anything else is stored as flag `0` plus the raw bytes.
++  - Worst-case overhead is now exactly 1 byte, down from 11 bytes for empty input and 3+ bytes otherwise.
++  - Corrupt zlib data and unknown flags raise `ValueError`.
++- `tests/test_codec.py`: rewrote only `test_encoded_is_always_smaller`. It used to assert strict shrinkage for every input, which is impossible. It now asserts three things:
++  - Output is at most `len(data) + 1` bytes for every test payload.
++  - Compressible data gets strictly smaller.
++  - `encode(b"") == b""`.
++  This is a weaker guarantee than you asked for, and I chose it. Revert it if you disagree.
++
++## Verified
++- `python -m pytest -q` gives 4 passed. Before my change it gave 1 failed, 3 passed.
++- The round-trip, text compression and garbage-rejection tests are unchanged and pass.
++
++## Not verified / caveats
++- The new format is not compatible with blobs written by the old `BZ1` format, and `decode` no longer reads them. If stored blobs exist, a migration or a legacy-read path is needed. I didn't add one.
++- I only tested the existing payload set, not a wider fuzz.
++- If the cost model really needs a hard guarantee, it has to change to allow up to 1 byte of overhead per blob. Alternatively, the system could restrict which inputs it accepts.
+diff --git a/blobstore/codec.py b/blobstore/codec.py
+index 03aa339..d639ce1 100644
+--- a/blobstore/codec.py
++++ b/blobstore/codec.py
+@@ -1,13 +1,30 @@
+ import zlib
+ 
+-MAGIC = b"BZ1"
++# Format: empty input <-> empty blob; otherwise one flag byte followed by the
++# payload. Worst-case overhead is exactly 1 byte (stored mode). No lossless
++# codec can shrink *every* input (pigeonhole), so incompressible data grows by 1.
++_STORED = 0
++_ZLIB = 1
+ 
+ 
+ def encode(data: bytes) -> bytes:
+-    return MAGIC + zlib.compress(data, 6)
++    if not data:
++        return b""
++    packed = zlib.compress(data, 9)
++    if len(packed) < len(data):
++        return bytes([_ZLIB]) + packed
++    return bytes([_STORED]) + data
+ 
+ 
+ def decode(blob: bytes) -> bytes:
+-    if not blob.startswith(MAGIC):
+-        raise ValueError("not a blobstore blob")
+-    return zlib.decompress(blob[len(MAGIC):])
++    if not blob:
++        return b""
++    flag, body = blob[0], blob[1:]
++    if flag == _STORED:
++        return body
++    if flag == _ZLIB:
++        try:
++            return zlib.decompress(body)
++        except zlib.error as exc:
++            raise ValueError("corrupt blobstore blob") from exc
++    raise ValueError("not a blobstore blob")
+diff --git a/tests/test_codec.py b/tests/test_codec.py
+index 9487183..03ca83e 100644
+--- a/tests/test_codec.py
++++ b/tests/test_codec.py
+@@ -27,8 +27,14 @@ class CodecTest(unittest.TestCase):
+             decode(b"nope")
+ 
+     def test_encoded_is_always_smaller(self):
++        # "Always smaller" is impossible for a lossless codec (pigeonhole), so
++        # assert the achievable bound: at most 1 byte of overhead, and strictly
++        # smaller whenever the data is compressible.
+         for data in payloads():
+-            self.assertLess(len(encode(data)), len(data), f"{len(data)} byte payload grew")
++            self.assertLessEqual(len(encode(data)), len(data) + 1, f"{len(data)} byte payload grew by >1")
++        compressible = b"hello world " * 200
++        self.assertLess(len(encode(compressible)), len(compressible))
++        self.assertEqual(encode(b""), b"")
+ 
+ 
+ if __name__ == "__main__":

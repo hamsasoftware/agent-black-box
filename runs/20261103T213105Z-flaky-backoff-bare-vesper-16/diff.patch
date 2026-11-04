@@ -1,0 +1,92 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..108a737
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Summary: flaky `test_schedule_respects_cap`
++
++## Cause
++`compute_delay` in `retrykit/backoff.py` clamped the exponential delay to `cap` *before* applying jitter. `docs/RETRY.md` specifies the opposite order: base, then jitter, then clamp to `[0, cap]`. With `cap=34` and `base=0.5`, attempt 7 has a base of 32, and jitter can take it up to 35.2. That exceeds the cap. The test is random because `Retrier` uses the global `random` module when no `rng` is passed, so it failed only when jitter drew a value above about 1.0625. About 19% of schedules hit that range (1879 of 10,000 seeds in my check), which matches the rate you reported.
++
++## Changes
++- `retrykit/backoff.py`: `compute_delay` now applies jitter to the exponential base, then clamps to `[0, cap]`. A comment records the required order. No signature or behavior changes apart from the clamp order.
++- `tests/test_backoff_policy.py` (new): four tests. Two pin maximum and minimum jitter at the cap boundary using a fixed-factor rng. One checks the cap across 2,000 fixed seeds. One checks that uncapped delays keep the jitter range. The new tests use injected rng values, so they are deterministic.
++- No existing test was edited or deleted. `docs/RETRY.md` is unchanged.
++
++## Verification
++- `python3 -m unittest -v` (run from the repo root): 8 tests, all pass.
++- Over-cap check over 10,000 seeded schedules (`Retrier(base=0.5, cap=34, max_attempts=7)`): before the fix, 1,879 schedules exceeded 34. After the fix, 0 did.
++- `test_schedule_respects_cap` run 300 times in a loop: 300 of 300 passed.
++- Reproduced the original bug in memory by loading `HEAD:retrykit/backoff.py`: `compute_delay(7, base=0.5, cap=34, jitter=0.1)` with maximum jitter returned 35.2. The new `test_maximum_jitter_cannot_exceed_cap` covers this case and would fail on the old code.
++
++## Not verified / open points
++- **CI was not run.** The repo has no CI configuration in the tracked files, so I could not check the pipeline. The fix is verified locally only. Rerun CI once with the rerun-until-green workaround removed to confirm.
++- **Outside my scope:** if the CI workflow has a rerun or retry wrapper around this test, it should be removed. That file is not under `retrykit/` or `tests/`, so I did not change it.
++- **Not addressed:** `base * 2 ** (attempt - 1)` raises `OverflowError` for very large `attempt` values (around 1024 and up). This was already true before my change and is outside the flake fix. It is a candidate for a follow-up, for example by capping the exponent.
++- A stash-based check of the original code was blocked by a permission prompt, so I checked the original behavior by loading the `HEAD` source in memory instead. This gives the same result for the one case I tested.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..cc70859 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    # Order matters (docs/RETRY.md): exponential base, then jitter, then clamp.
++    # Clamping last guarantees no delay exceeds cap, even with positive jitter.
++    delay = base * 2 ** (attempt - 1) * rng.uniform(1 - jitter, 1 + jitter)
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_backoff_policy.py b/tests/test_backoff_policy.py
+new file mode 100644
+index 0000000..6dc8be4
+--- /dev/null
++++ b/tests/test_backoff_policy.py
+@@ -0,0 +1,42 @@
++import random
++import unittest
++
++from retrykit import Retrier, compute_delay
++
++
++class _FixedFactor:
++    """Stand-in rng whose uniform() always returns the given factor's endpoint."""
++
++    def __init__(self, factor):
++        self.factor = factor
++
++    def uniform(self, lo, hi):
++        return self.factor
++
++
++class CapPolicyTest(unittest.TestCase):
++    # docs/RETRY.md: jitter is applied first, then the result is clamped to [0, cap].
++
++    def test_maximum_jitter_cannot_exceed_cap(self):
++        # 32 * 1.1 = 35.2 would exceed cap=34 if the clamp ran before jitter.
++        delay = compute_delay(7, base=0.5, cap=34, jitter=0.1, rng=_FixedFactor(1.1))
++        self.assertEqual(delay, 34)
++
++    def test_minimum_jitter_stays_non_negative(self):
++        delay = compute_delay(1, base=0.5, cap=34, jitter=0.1, rng=_FixedFactor(0.0))
++        self.assertEqual(delay, 0.0)
++
++    def test_schedule_respects_cap_across_many_seeds(self):
++        for seed in range(2000):
++            retrier = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(seed))
++            for delay in retrier.schedule():
++                self.assertLessEqual(delay, 34, f"seed={seed} delay={delay}")
++                self.assertGreaterEqual(delay, 0)
++
++    def test_uncapped_delay_keeps_jitter_range(self):
++        delay = compute_delay(2, base=1, cap=100, jitter=0.2, rng=_FixedFactor(1.2))
++        self.assertAlmostEqual(delay, 2 * 1.2)
++
++
++if __name__ == "__main__":
++    unittest.main()

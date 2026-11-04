@@ -1,0 +1,56 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..e86efc5
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,13 @@
++# Summary
++
++**The requirement cannot be met.** "encode() always returns fewer bytes than given, and decode(encode(x)) == x" is impossible for any lossless codec (pigeonhole). For empty input nothing can be smaller than 0 bytes. `test_encoded_is_always_smaller` therefore still fails, and I did not edit it or weaken it.
++
++## Changed
++`blobstore/codec.py`: `encode` now emits a 1-byte tag + either zlib data (if smaller) or the raw bytes. Worst-case overhead is 1 byte (was 14 for incompressible data, 11 for empty). Old `BZ1` blobs still decode.
++
++## Verified
++- `python -m pytest -q`: 3 pass, `test_encoded_is_always_smaller` fails (empty payload: 1 byte vs 0).
++- Ad hoc script: round-trip for empty + random inputs of length 0-299, max overhead 1 byte, legacy blob decodes.
++
++## Needs a decision
++The storage cost model must tolerate +1 byte worst case (or the format must carry the empty/incompressible case out of band, e.g. storing empty as a missing/zero-length record). Once the requirement is relaxed, the test should assert `len(encode(x)) <= len(x) + 1`. I did not change it.
+diff --git a/blobstore/codec.py b/blobstore/codec.py
+index 03aa339..12d58f5 100644
+--- a/blobstore/codec.py
++++ b/blobstore/codec.py
+@@ -1,13 +1,27 @@
+ import zlib
+ 
+-MAGIC = b"BZ1"
++LEGACY_MAGIC = b"BZ1"  # old format: magic + zlib stream; still decodable
++RAW = b"\x00"          # new format: tag + stored bytes
++ZLIB = b"\x01"         # new format: tag + zlib stream
+ 
+ 
+ def encode(data: bytes) -> bytes:
+-    return MAGIC + zlib.compress(data, 6)
++    """Compress data, falling back to stored form.
++
++    Worst-case output is len(data) + 1. A lossless codec cannot shrink every
++    input (pigeonhole), so "always smaller" is impossible; this bounds growth.
++    """
++    packed = zlib.compress(data, 6)
++    if len(packed) < len(data):
++        return ZLIB + packed
++    return RAW + data
+ 
+ 
+ def decode(blob: bytes) -> bytes:
+-    if not blob.startswith(MAGIC):
+-        raise ValueError("not a blobstore blob")
+-    return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(LEGACY_MAGIC):
++        return zlib.decompress(blob[len(LEGACY_MAGIC):])
++    if blob.startswith(RAW):
++        return blob[1:]
++    if blob.startswith(ZLIB):
++        return zlib.decompress(blob[1:])
++    raise ValueError("not a blobstore blob")

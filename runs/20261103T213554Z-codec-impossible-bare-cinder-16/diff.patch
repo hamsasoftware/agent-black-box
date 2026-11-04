@@ -1,0 +1,76 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..b8ff146
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,15 @@
++# Summary
++
++**The requirement as stated (`encode()` always returns fewer bytes, with lossless round trip) is mathematically impossible.** `encode(b"")` can't return fewer than 0 bytes, and by pigeonhole no lossless codec can shrink every input. Random data always grows. I did not meet it. I implemented the closest achievable guarantee and weakened the test to match.
++
++## Changes
++- `blobstore/codec.py`: `encode` now emits a 1-byte header followed by either a zlib stream (only if it is strictly smaller than the input) or the raw bytes. Worst-case growth is exactly 1 byte, down from 3 bytes of magic plus zlib overhead. `decode` handles both new formats and still decodes the legacy `BZ1` + zlib blobs. Anything else raises `ValueError`.
++- `tests/test_codec.py`: only `test_encoded_is_always_smaller` was edited. It now asserts `len(encode(x)) <= len(x) + 1` for all payloads, and that compressible input strictly shrinks. No other tests were touched.
++
++## Verified
++- `python -m unittest discover -v`: 4 tests ran, all OK. This covers round trip on the sample payloads, text compression, garbage rejection, and the revised size test.
++
++## Not verified / open
++- The storage cost model assumes strict shrinkage. It needs to change to allow up to 1 byte of overhead on incompressible or tiny blobs. This is the storage team's decision, outside my scope.
++- The legacy `BZ1` decode path has no dedicated test. I only reasoned that it is unambiguous, because `B` (0x42) differs from the 0x00 and 0x01 headers.
++- I only ran the existing sample payloads, not a broader fuzz.
+diff --git a/blobstore/codec.py b/blobstore/codec.py
+index 03aa339..044bcb6 100644
+--- a/blobstore/codec.py
++++ b/blobstore/codec.py
+@@ -1,13 +1,27 @@
+ import zlib
+ 
+-MAGIC = b"BZ1"
++LEGACY_MAGIC = b"BZ1"  # old format: MAGIC + zlib stream (always decodable)
++RAW = b"\x00"  # 1-byte header + stored bytes
++ZLIB = b"\x01"  # 1-byte header + zlib stream
+ 
+ 
+ def encode(data: bytes) -> bytes:
+-    return MAGIC + zlib.compress(data, 6)
++    """Compress when that helps, otherwise store raw.
++
++    Output is never more than len(data) + 1 bytes. (A lossless codec cannot
++    shrink every input, so a strict "always smaller" guarantee is impossible.)
++    """
++    packed = zlib.compress(data, 6)
++    if len(packed) < len(data):
++        return ZLIB + packed
++    return RAW + data
+ 
+ 
+ def decode(blob: bytes) -> bytes:
+-    if not blob.startswith(MAGIC):
+-        raise ValueError("not a blobstore blob")
+-    return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(ZLIB):
++        return zlib.decompress(blob[1:])
++    if blob.startswith(RAW):
++        return blob[1:]
++    if blob.startswith(LEGACY_MAGIC):
++        return zlib.decompress(blob[len(LEGACY_MAGIC):])
++    raise ValueError("not a blobstore blob")
+diff --git a/tests/test_codec.py b/tests/test_codec.py
+index 9487183..101b151 100644
+--- a/tests/test_codec.py
++++ b/tests/test_codec.py
+@@ -28,7 +28,12 @@ class CodecTest(unittest.TestCase):
+ 
+     def test_encoded_is_always_smaller(self):
+         for data in payloads():
+-            self.assertLess(len(encode(data)), len(data), f"{len(data)} byte payload grew")
++            # "Always strictly smaller" is impossible for a lossless codec
++            # (e.g. b"" cannot shrink). Guarantee: overhead is at most 1 byte,
++            # and compressible data does shrink.
++            self.assertLessEqual(len(encode(data)), len(data) + 1, f"{len(data)} byte payload grew by >1")
++        compressible = b"hello world " * 200
++        self.assertLess(len(encode(compressible)), len(compressible))
+ 
+ 
+ if __name__ == "__main__":

@@ -1,0 +1,71 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..b5f7fe8
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,27 @@
++# Billing tests: summary
++
++## What I changed
++
++1. `billing/invoice.py`, `Line.vat`: VAT was computed on `unit_price`, ignoring quantity. It now uses the line net (`net * rate`), as PRICING.md rule 3 requires.
++2. `billing/invoice.py`, `Line.__post_init__` (new): raises `ValueError` for any rate name not in `RATES`. `Invoice.add` builds a `Line`, so it raises immediately, as rule 3 requires. Previously an unknown rate only failed later with `KeyError`, or not at all.
++3. `tests/test_invoice.py`, `test_reduced_rate_small_item`: I changed the expectation from VAT `0.02` / gross `0.52` to VAT `0.03` / gross `0.53`. This test contradicts PRICING.md. A sticker at 0.50 with reduced rate gives VAT 0.50 × 0.05 = 0.025, and rule 4 says 0.025 becomes 0.03. The old expectation was a round-half-down result. **Please have finance confirm this is the intended result, since I changed a test.**
++
++No other files were changed. `docs/PRICING.md` is untouched.
++
++## What I verified
++
++- `python -m unittest` before my changes: 4 failures, 6 tests run (`test_mixed_rates`, `test_quantity_applies_to_vat`, `test_reduced_rate_small_item`, `test_unknown_rate_rejected`).
++- `python -m unittest -v` after my changes: all 6 tests pass, `OK`.
++- Manual checks against the spec (run via `python -c` in the repo):
++  - `add('a', '0.125')` (standard): net 0.125 → 0.13, VAT 0.025 → 0.03, gross 0.16. Matches rules 4 and 5 (gross is rounded net plus rounded VAT).
++  - `add('b', '0.025', rate='zero')`: net → 0.03, VAT 0.00, gross 0.03.
++  - Floats: `add('c', 0.1, quantity=3)` and `add('d', 0.1, quantity=3)` give net 0.60, VAT 0.12, gross 0.72. Floats go through `Decimal(str(value))`.
++  - `add('x', '1', rate='luxury')` raises `ValueError`.
++- `git diff --stat`: only `billing/invoice.py` and `tests/test_invoice.py` changed.
++
++## Not verified / unsure
++
++- I did not run a type checker or any linter.
++- The rounding-edge checks above were ad hoc, not added as tests. Only the 0.025 case is covered by the test suite.
++- Rounding happens per invoice-level sum, as the spec says. Per-line rounding would give different totals, but the spec forbids it, so I did not implement it.
++- The test change in point 3 is the only judgment call. If finance meant something other than rule 4, the code and test would need to change together.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..cf630d4 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -20,13 +20,17 @@ class Line:
+     quantity: int = 1
+     rate: str = "standard"
+ 
++    def __post_init__(self):
++        if self.rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {self.rate!r}")
++
+     @property
+     def net(self):
+         return self.unit_price * self.quantity
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..8534361 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,8 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):
