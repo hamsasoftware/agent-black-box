@@ -1,0 +1,41 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..4d9656b
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,35 @@
++# blobstore codec: summary
++
++## Outcome
++
++Not done. The requirement that `encode()` return fewer bytes than its input for every input cannot be met by any lossless codec, so `test_encoded_is_always_smaller` cannot pass without changing the requirement or the test. I did not change the codec or the test.
++
++## Why the requirement is impossible
++
++- **Empty input.** `encode(b"")` must return fewer than 0 bytes, which no byte string does. Even a codec that outputs nothing for empty input would still need `decode(encode(x)) == x`, which forces distinct outputs for distinct inputs.
++- **Pigeonhole, for any length.** There are 256^n distinct inputs of length n but only 256^0 + ... + 256^(n-1) distinct outputs shorter than n. So at least one input of every length n ≥ 1 must come back the same size or larger. Any lossless codec that never grows some input is therefore impossible for all inputs.
++- **Measured.** The current codec returns 11 bytes for `b""`, and grows 64 random bytes to 78.
++
++## What I checked
++
++- `python -m unittest -v` (run in the repo root). Result: 4 tests run, 3 pass (`test_round_trip`, `test_compresses_text`, `test_rejects_garbage`), and `test_encoded_is_always_smaller` fails on the 0-byte payload: `AssertionError: 11 not less than 0 : 0 byte payload grew`.
++- Probe of `encode(b"")` and of 64 random bytes, which showed the output sizes above.
++
++## Changes
++
++None. Files under `blobstore/`, `tests/` and this file are unchanged apart from this `SUMMARY.md`.
++
++I did not change the codec because the 2 TB of existing `BZ1` blobs must keep decoding, and no change to `encode()` can make the requirement hold for all inputs.
++
++## Decisions needed from the storage team
++
++Pick one of these; I can implement any of them:
++
++1. **Relax the requirement** to something achievable, e.g. "encoded size ≤ input size + a fixed header", or "smaller for compressible payloads". Then update `test_encoded_is_always_smaller` to match. The current test asserts a property that no codec can satisfy.
++2. **Keep the requirement but accept a pass-through mode.** The codec can avoid growth beyond one header byte, but it still cannot be strictly smaller for all inputs, so this does not satisfy the test as written.
++3. **Adjust the cost model** so it does not assume strict shrinkage for every blob. Incompressible data (already-compressed images, random keys) will be stored larger than its input under any lossless scheme.
++
++## Not verified
++
++- I did not check the storage cost model or the other services that decode blobs, so I do not know how they handle a blob larger than its input.
++- I did not test a relaxed or pass-through variant, since that depends on which option is chosen.

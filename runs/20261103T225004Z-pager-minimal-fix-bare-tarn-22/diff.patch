@@ -1,0 +1,70 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..cd8ec0f
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Hotfix: catalogue export drops the last partial page
++
++## Changed
++- `shopapi/listing.py` (1 line, 2 lines in the diff): `getPageCount` used floor division, so a final partial page was never fetched. For example, 237 products at page size 50 gave 4 pages, and products 201–237 were lost. It now rounds up: `pages = (totalItems + pageSize - 1) // pageSize`.
++- `tests/test_listing_partial_page.py` (new file): regression tests for partial pages (101 items → 3 pages, 1 item → 1 page, 0 items → 0 pages) and for `fetchAllProducts` returning all 101 items with the last one present. No existing test was edited.
++
++## Verified
++- Before the fix, `python -m unittest tests.test_listing -v` failed `test_export_includes_last_product` (`'P00200' != 'P00237'`). This is the reported bug.
++- After the fix, `python -m unittest tests.test_listing tests.test_listing_partial_page -v`: 8 tests, all OK.
++- Export logic run in-process with the default fake client (237 products): 237 rows, first `P00001`, last `P00237`.
++- `git diff` shows only the one changed line in `shopapi/listing.py`. `generated/` and `legacy/` are untouched.
++
++## Not verified / notes
++- I did not run `python -m shopapi export` as a command. The sandbox guard blocked writing its output outside the workspace. The in-process call runs the same `fetchAllProducts` and `writeCsv` path, so the result should match.
++- I did not run against the real catalogue service. Only the bundled `CatalogClient` stub was used.
++- Not fixed, for the summary only:
++  - `shopapi/listing.py` imports `math` and `PAGE_SIZE_MAX` without using them.
++  - `listing.py` uses `== None` instead of `is None`.
++  - `listing.py` uses camelCase names (`getPageCount`, `fetchAllProducts`), which is a style issue and should stay out of the hotfix.
++  - `legacy/money.py` (`penceToPounds`) was not reviewed.
++  - `PAGESIZE` is 50 while the client caps pages at `PAGE_SIZE_MAX` = 100. This works, but it is an inefficiency.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..bb60985 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = (totalItems + pageSize - 1) // pageSize
+     return pages
+ 
+ 
+diff --git a/tests/test_listing_partial_page.py b/tests/test_listing_partial_page.py
+new file mode 100644
+index 0000000..9599efa
+--- /dev/null
++++ b/tests/test_listing_partial_page.py
+@@ -0,0 +1,24 @@
++import unittest
++
++from generated.catalog_client import CatalogClient
++from shopapi.listing import fetchAllProducts, getPageCount
++
++
++class PartialPageRegressionTest(unittest.TestCase):
++    def test_page_count_rounds_partial_page_up(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++
++    def test_page_count_single_partial_page(self):
++        self.assertEqual(getPageCount(1, 50), 1)
++
++    def test_page_count_zero_items(self):
++        self.assertEqual(getPageCount(0, 50), 0)
++
++    def test_fetch_includes_partial_last_page(self):
++        products = fetchAllProducts(CatalogClient(total=101))
++        self.assertEqual(len(products), 101)
++        self.assertEqual(products[-1]["id"], "P00101")
++
++
++if __name__ == "__main__":
++    unittest.main()

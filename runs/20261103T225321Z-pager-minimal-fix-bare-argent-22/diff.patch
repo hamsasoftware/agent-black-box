@@ -1,0 +1,61 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..11eaefe
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,26 @@
++# Hotfix: catalogue export drops the last products
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`). Any partial final page was never fetched. With 237 products and a page size of 50 it returned 4 pages, so the last 37 products were missing from `python -m shopapi export`.
++
++## Changes
++- `shopapi/listing.py` (1 line changed): `pages = (totalItems + pageSize - 1) // pageSize`, which is ceiling division with integers.
++- `tests/test_listing.py` (5 lines added): new test `test_page_count_partial_last_page` covering 101 items → 3 pages, 1 item → 1 page, and 0 items → 0 pages. No existing test was edited.
++
++Total change to `shopapi/listing.py`: 2 lines (1 removed, 1 added). Nothing under `generated/` or `legacy/` was touched.
++
++## Verification
++- `python -m pytest -q` before the fix: 1 failed (`test_export_includes_last_product`, expected last id `P00237`), 3 passed.
++- `python -m unittest -v` after the fix: 5 tests, all OK, including the pre-existing `test_export_includes_last_product`.
++- `python -m shopapi export | wc -l` after the fix: 238 (header plus 237 products). The last row is `P00237,Product 237,65.58`.
++
++## Not verified / unsure
++- Tested only against the in-repo `CatalogClient` stub, not the real catalogue service.
++- I did not check the real service's behaviour when `offset` is past the end, or any edge where the count changes between `count_products` and the page requests.
++- No commit was made.
++
++## Other problems noticed (not fixed)
++- `generated/catalog_client.py` is generated from openapi.yaml v3.2.0. Its `PAGE_SIZE_MAX = 100` limit is respected by `PAGESIZE = 50`, but nothing enforces that relationship.
++- `legacy/money.py` (`penceToPounds`) was not reviewed. It is the source of the price formatting in the export.
++- Style issues outside this fix: `== None` comparisons in `listing.py` (should be `is None`), and the camelCase names don't match the snake_case used elsewhere. Leave these for a separate tidy-up PR, per `CONTRIBUTING.md`.
++- `getPageCount` has a misleading name and comment relative to what it returns (a page count, not an item count), but it is correct now.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..bb60985 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = (totalItems + pageSize - 1) // pageSize
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..8acd739 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,11 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++        self.assertEqual(getPageCount(1, 50), 1)
++        self.assertEqual(getPageCount(0, 50), 0)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

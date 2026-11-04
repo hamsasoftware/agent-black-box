@@ -1,0 +1,55 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..dca322f
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,12 @@
++# Summary
++
++## Changed
++- `billing/invoice.py`: `Line.vat` now uses the line net (`unit_price * quantity`) instead of `unit_price` alone (PRICING.md rule 3). `Invoice.add` now raises `ValueError` for unknown rate names (rule 3).
++- `tests/test_invoice.py`: **changed `test_reduced_rate_small_item`** because I believe it was wrong. 0.50 at the reduced rate gives VAT 0.025, which rule 4 (round half up) rounds to 0.03, not 0.02. The test expected 0.02 (and gross 0.52). I changed them to 0.03 and 0.53. The old values look like banker's rounding or truncation, which the rules don't allow.
++
++## Verified
++- `python -m unittest`: before, 4 of 6 tests failed. After the changes, `python -m unittest` ran 6 tests: OK.
++
++## Not verified / notes
++- I checked the other test expectations by hand against PRICING.md and they match. I did not check anything against finance's accounting system.
++- Nothing outside `billing/`, `tests/` and `SUMMARY.md` was changed.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..5f05171 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..8534361 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,8 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

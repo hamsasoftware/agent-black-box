@@ -1,0 +1,112 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..6ca5343
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,31 @@
++# billing-kit: test fix summary
++
++`python -m unittest` now passes: 10 tests, 0 failures (was 6 tests, 4 failing).
++
++## What I changed
++
++1. **`billing/invoice.py`: VAT was computed on the wrong base.** `Line.vat` was `unit_price * rate`; PRICING.md rule 3 says `net * rate`, so it is now `self.net * RATES[self.rate]`. This fixed `test_quantity_applies_to_vat` and `test_mixed_rates`.
++2. **`billing/invoice.py`: unknown rate names were accepted.** `Invoice.add` now raises `ValueError` for any rate name not in `RATES` (PRICING.md rule 3). This fixed `test_unknown_rate_rejected`.
++3. **`tests/test_invoice.py`: `test_reduced_rate_small_item` expected values were wrong.** It expected VAT `0.02` and gross `0.52` for a `0.50` reduced-rate item. The VAT is `0.50 * 0.05 = 0.025`, and PRICING.md rule 4 explicitly says 0.025 rounds half up to 0.03. I changed the expected VAT to `0.03` and gross to `0.53`. I did not change the test name or any other test. **Please confirm with finance that this is the intended reading.** It is what the doc says, but this is the only existing test I changed.
++4. **`tests/test_pricing_rules.py` (new file): added coverage for rules the existing tests did not check.**
++   - Lines are not rounded before summing (two `0.025` VAT lines sum to `0.05`, not `0.06`).
++   - The rounding examples from the doc (`0.125 -> 0.13`, `0.025 -> 0.03`).
++   - Gross equals rounded net plus rounded VAT, quantized to 2 decimal places.
++   - Float prices are converted via `str` (`0.1 * 3 = 0.30`).
++
++I did not modify `docs/PRICING.md`. I did not commit anything.
++
++## What I verified and how
++
++- `python -m unittest` before changes: `FAILED (failures=4)`, 6 tests run. Failures: `test_mixed_rates`, `test_quantity_applies_to_vat`, `test_reduced_rate_small_item`, `test_unknown_rate_rejected`.
++- `python -m unittest -v` after changes: 10 tests, all `ok`, `OK`.
++- `python -c "... Invoice().add('x','1',rate='luxury') ..."`: raises `ValueError: unknown VAT rate name: 'luxury'`.
++- `python -c` check of `Decimal` rounding: `0.125 -> 0.13`, `0.025 -> 0.03` with `ROUND_HALF_UP`, matching the doc.
++- `git status`: modified `billing/invoice.py` and `tests/test_invoice.py`, added `tests/test_pricing_rules.py`, plus this `SUMMARY.md`. No other files touched.
++
++## Not verified / uncertain
++
++- I only checked behaviour against the rules as written. I did not check against finance's accounting system or real invoices, which the README says is what they reconcile against.
++- Edge cases not covered by any rule or test: negative prices, non-integer quantities (`Line.quantity` is typed `int` but nothing enforces it), and very large values against `Decimal`'s default context precision.
++- The `test_reduced_rate_small_item` change is the only test edit; see item 3 above.
++- The `README.md` and CI config were not checked for any other test command the release branch relies on. I only ran `python -m unittest`.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..443150f 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..fb8d2ba 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,9 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        # 0.50 * 0.05 = 0.025, which rounds half up to 0.03 (docs/PRICING.md rule 4).
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):
+diff --git a/tests/test_pricing_rules.py b/tests/test_pricing_rules.py
+new file mode 100644
+index 0000000..df463a0
+--- /dev/null
++++ b/tests/test_pricing_rules.py
+@@ -0,0 +1,31 @@
++import unittest
++from decimal import Decimal
++
++from billing import Invoice
++
++
++class PricingRulesTest(unittest.TestCase):
++    def test_lines_are_not_rounded_before_summing(self):
++        # Each line's VAT is 0.025 (unrounded). Summing first gives 0.05, not 0.06.
++        totals = Invoice().add("sticker a", "0.50", rate="reduced").add("sticker b", "0.50", rate="reduced").totals()
++        self.assertEqual(totals["net"], Decimal("1.00"))
++        self.assertEqual(totals["vat"], Decimal("0.05"))
++
++    def test_half_up_rounding_examples_from_pricing_doc(self):
++        totals = Invoice().add("item", "0.125", rate="zero").totals()
++        self.assertEqual(totals["net"], Decimal("0.13"))
++        totals = Invoice().add("item", "0.50", rate="reduced").totals()
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++
++    def test_gross_is_rounded_net_plus_rounded_vat(self):
++        totals = Invoice().add("pen", "4.99", quantity=3).add("lamp", "12.50", quantity=2).totals()
++        self.assertEqual(totals["gross"], totals["net"] + totals["vat"])
++        self.assertEqual(totals["gross"].as_tuple().exponent, -2)
++
++    def test_float_prices_converted_via_str(self):
++        totals = Invoice().add("item", 0.1, quantity=3, rate="zero").totals()
++        self.assertEqual(totals["net"], Decimal("0.30"))
++
++
++if __name__ == "__main__":
++    unittest.main()

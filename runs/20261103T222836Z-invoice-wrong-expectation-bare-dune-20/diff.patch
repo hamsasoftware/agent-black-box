@@ -1,0 +1,75 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..e46298f
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,24 @@
++# billing-kit: test fix summary
++
++## What was wrong and what changed
++
++Four tests were failing. Two code defects caused three of them, and one test expectation contradicted `docs/PRICING.md`.
++
++1. **VAT ignored quantity** (`billing/invoice.py`, `Line.vat`). It computed `unit_price * rate`, but PRICING.md rule 3 says VAT is `net * rate`, where net is `unit_price * quantity`. Changed to `self.net * RATES[self.rate]`. This fixed `test_quantity_applies_to_vat` and `test_mixed_rates`.
++2. **Unknown rate name was not rejected at `add()`** (`billing/invoice.py`, `Invoice.add`). It was only caught later as a `KeyError` inside `totals()`. PRICING.md rule 3 requires `Invoice.add` to raise `ValueError` immediately. Added a check that raises `ValueError` before the line is appended. This fixed `test_unknown_rate_rejected`.
++3. **Test expectation contradicted the spec** (`tests/test_invoice.py`, `test_reduced_rate_small_item`). A £0.50 sticker at the reduced rate has VAT 0.025. PRICING.md rule 4 says 0.025 rounds half up to **0.03**. The test expected 0.02 (and gross 0.52). I changed it to VAT 0.03 and gross 0.53. The code already produced 0.03, so this test is the one I changed. Please have finance confirm the example if there is any doubt.
++4. **Added a test** (`tests/test_invoice.py`, `test_rounding_is_applied_per_total_and_gross_adds_rounded_parts`). It covers PRICING.md rules 4 and 5: net 0.125 rounds to 0.13, VAT 0.025 rounds to 0.03, and gross is 0.16 (rounded net plus rounded VAT), not 0.15. This is a new test, not a change to an existing one.
++
++Nothing in `docs/PRICING.md` was changed. No other files were changed.
++
++## What I verified
++
++- `python -m unittest` before the changes: 4 failures out of 6 tests (`FFF..F`).
++- `python -m unittest -v` after the changes: `Ran 7 tests ... OK`, all 7 pass.
++- Reviewed `billing/invoice.py` against each numbered rule in `docs/PRICING.md`. Rules 1 (Decimal via `Decimal(str(value))`), 2 (net = unit price × quantity), 4 (unrounded lines, one rounding per total, ROUND_HALF_UP), and 5 (gross = rounded net + rounded VAT) already matched the code. Only rule 3 needed fixing.
++
++## Not verified / uncertain
++
++- I could not run ad-hoc Python checks in this sandbox (inline `python -c` and writing scratch files outside the workspace were blocked), so the rounding checks are covered only by the unit tests above.
++- `Line` is a public dataclass and can still be built directly with an invalid `rate`. Such a line would only fail in `totals()` with a `KeyError`. The spec only requires `Invoice.add` to reject bad rates, so I did not add validation to `Line`.
++- I did not check the code against the accounting system. Finance's reconciliation is the real test of the rules.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..443150f 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..f0bd25f 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -26,9 +26,16 @@ class InvoiceTotalsTest(unittest.TestCase):
+         self.assertEqual(totals["gross"], Decimal("40.36"))
+ 
+     def test_reduced_rate_small_item(self):
++        # docs/PRICING.md rule 4: 0.025 rounds half up to 0.03 (not 0.02).
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
++
++    def test_rounding_is_applied_per_total_and_gross_adds_rounded_parts(self):
++        # docs/PRICING.md rules 4 and 5: 0.125 -> 0.13; VAT 0.025 -> 0.03;
++        # gross = 0.13 + 0.03 = 0.16 (not round(0.125 + 0.025) = 0.15).
++        totals = Invoice().add("x", "0.125").totals()
++        self.assertEqual(totals, {"net": Decimal("0.13"), "vat": Decimal("0.03"), "gross": Decimal("0.16")})
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

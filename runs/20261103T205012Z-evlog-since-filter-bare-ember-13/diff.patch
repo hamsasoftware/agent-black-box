@@ -1,0 +1,246 @@
+diff --git a/README.md b/README.md
+index 20a87b4..3eed58a 100644
+--- a/README.md
++++ b/README.md
+@@ -12,4 +12,10 @@ Each line of an events file is a JSON object:
+ 
+ Collectors run in several regions and stamp events with their own UTC offset. Legacy collectors (anything installed before 2024) write naive timestamps such as `2024-03-09 22:10:00`; those are UTC. Blank lines are ignored.
+ 
++To look only at recent events, pass `--since` with a date or timestamp:
++
++    python -m evlog report events.jsonl --since 2024-03-10
++
++Only events at or after that instant are counted. A bare date means midnight UTC, the same convention as naive timestamps in the file. A value with an offset such as `2024-03-10T08:00:00+09:00` is converted to UTC. An unparseable value exits with status 2 and a usage message.
++
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..6c2733a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,30 @@
++# Summary: `evlog report --since`
++
++## What changed
++- `evlog/cli.py`: added `--since DATE` to `report`. It is parsed by `parse_since`, which returns an aware UTC datetime. Bad values fail argparse with a usage message and exit 2, not a traceback.
++- `evlog/events.py`: added `as_utc` and `events_since`. Naive event timestamps are treated as UTC, so they can be compared with aware values without a `TypeError`.
++- `tests/test_since.py` (new): 13 tests in total, including the teammate's two in `tests/test_report.py`. The new tests cover:
++  - a bare date means midnight UTC;
++  - the boundary is inclusive;
++  - an offset in `--since` is respected;
++  - no matches gives `total 0`;
++  - the option works before the path;
++  - invalid, garbage, and missing values give a clean error;
++  - `parse_since` and `events_since` directly.
++- `README.md`: documented `--since` and the UTC convention.
++- No existing test was edited or deleted. `tests/test_report.py` was left untouched.
++
++## Choices to review
++- **Day boundary is UTC.** `--since 2024-03-10` keeps events at or after 2024-03-10T00:00Z. It does not use the local day of each event's offset, and it does not use a timezone of ops' choosing. Ops should confirm this matches what they mean. If they want a local day, that is a small change in `parse_since`.
++- Only `--since` is handled as bad input. A missing events file, or a malformed JSON or timestamp line in the file, still raises a traceback. That was out of scope and is unchanged.
++
++## Verification
++- `python -m unittest` before my changes: `test_since_excludes_older_days` errored (`unrecognized arguments: --since`), so the teammate's test was failing.
++- `python -m unittest` after my changes: `Ran 13 tests ... OK`.
++- `python -m evlog report --help`: shows `--since DATE` with its description.
++- `python -m evlog report README.md --since 2024-13-01`: prints `error: argument --since: invalid date/time '2024-13-01'; ...` and exits with code 2, no traceback.
++
++## Not verified
++- I did not run `python -m evlog report <file> --since ...` end to end on a real events file. I tried, but a shell command that writes a scratch file was blocked. The same paths are covered by the unit tests, which call `main()` directly.
++- I did not check against real collector output or ops' expected timezone.
++- Tests run on Python 3.14.3 only. `datetime.fromisoformat` accepts more formats on newer Python versions, so the accepted `--since` syntax may differ on older versions.
+diff --git a/evlog/cli.py b/evlog/cli.py
+index d8dccaf..91652e2 100644
+--- a/evlog/cli.py
++++ b/evlog/cli.py
+@@ -1,7 +1,19 @@
+ import argparse
+ import sys
++from datetime import datetime
+ 
+-from .events import count_events, read_events
++from .events import as_utc, count_events, events_since, read_events
++
++
++def parse_since(text):
++    """Parse a --since value. Dates are taken as midnight UTC, like naive timestamps."""
++    try:
++        value = datetime.fromisoformat(text)
++        return as_utc(value)
++    except (ValueError, OverflowError):
++        raise argparse.ArgumentTypeError(
++            f"invalid date/time {text!r}; expected e.g. 2024-03-10 or 2024-03-10T08:00:00+09:00"
++        ) from None
+ 
+ 
+ def build_parser():
+@@ -9,6 +21,12 @@ def build_parser():
+     commands = parser.add_subparsers(dest="command", required=True)
+     report = commands.add_parser("report", help="count events per service and level")
+     report.add_argument("path", help="events file (JSON lines)")
++    report.add_argument(
++        "--since",
++        type=parse_since,
++        metavar="DATE",
++        help="only count events at or after this date/time (UTC unless an offset is given)",
++    )
+     return parser
+ 
+ 
+@@ -22,6 +40,9 @@ def main(argv=None, out=None):
+     out = out or sys.stdout
+     args = build_parser().parse_args(argv)
+     if args.command == "report":
+-        counts = count_events(read_events(args.path))
++        events = read_events(args.path)
++        if args.since is not None:
++            events = events_since(events, args.since)
++        counts = count_events(events)
+         print(render(counts), file=out)
+     return 0
+diff --git a/evlog/events.py b/evlog/events.py
+index f5b9d64..4e101fd 100644
+--- a/evlog/events.py
++++ b/evlog/events.py
+@@ -1,7 +1,7 @@
+ import json
+ from collections import Counter
+ from dataclasses import dataclass
+-from datetime import datetime
++from datetime import datetime, timezone
+ 
+ 
+ @dataclass(frozen=True)
+@@ -29,5 +29,18 @@ def read_events(path):
+                 yield parse_line(line)
+ 
+ 
++def as_utc(ts):
++    """Return ``ts`` as an aware UTC datetime. Naive values are taken to be UTC."""
++    if ts.tzinfo is None:
++        return ts.replace(tzinfo=timezone.utc)
++    return ts.astimezone(timezone.utc)
++
++
++def events_since(events, start):
++    """Yield only events whose instant is at or after ``start``."""
++    start = as_utc(start)
++    return (event for event in events if as_utc(event.ts) >= start)
++
++
+ def count_events(events):
+     return Counter((event.service, event.level) for event in events)
+diff --git a/tests/test_since.py b/tests/test_since.py
+new file mode 100644
+index 0000000..161487b
+--- /dev/null
++++ b/tests/test_since.py
+@@ -0,0 +1,108 @@
++import io
++import json
++import os
++import tempfile
++import unittest
++from contextlib import redirect_stderr
++from datetime import datetime, timezone
++
++from evlog.cli import main, parse_since
++from evlog.events import Event, events_since
++
++
++class SinceOptionTest(unittest.TestCase):
++    def setUp(self):
++        # 2024-03-10T04:30Z is 2024-03-09 23:30 at UTC-5, the README example.
++        rows = [
++            {"ts": "2024-03-09T23:30:00-05:00", "service": "api", "level": "error"},
++            {"ts": "2024-03-09 23:30:00", "service": "api", "level": "error"},
++            {"ts": "2024-03-10T00:00:00+00:00", "service": "worker", "level": "info"},
++            {"ts": "2024-03-10T00:00:00+01:00", "service": "worker", "level": "info"},
++        ]
++        handle, self.path = tempfile.mkstemp(suffix=".jsonl")
++        with os.fdopen(handle, "w") as f:
++            for row in rows:
++                f.write(json.dumps(row) + "\n")
++
++    def tearDown(self):
++        os.unlink(self.path)
++
++    def run_cli(self, *args):
++        out = io.StringIO()
++        code = main(["report", *args, self.path], out=out)
++        return code, out.getvalue().strip().splitlines()
++
++    def test_date_is_midnight_utc(self):
++        # The offset-bearing 23:30 event at UTC-5 is 04:30Z on the 10th, so it is kept.
++        # The naive 23:30 event is UTC on the 9th, and the +01:00 midnight event
++        # is 23:00Z on the 9th, so both are dropped.
++        code, lines = self.run_cli("--since", "2024-03-10")
++        self.assertEqual(code, 0)
++        self.assertEqual(lines, ["api error 1", "worker info 1", "total 2"])
++
++    def test_boundary_is_inclusive(self):
++        code, lines = self.run_cli("--since", "2024-03-10T00:00:00+00:00")
++        self.assertEqual(lines, ["api error 1", "worker info 1", "total 2"])
++
++    def test_offset_in_since_is_respected(self):
++        # 2024-03-10T00:00+01:00 is 2024-03-09T23:00Z, so the naive 23:30 event
++        # and the +01:00 midnight event are kept too.
++        code, lines = self.run_cli("--since", "2024-03-10T00:00:00+01:00")
++        self.assertEqual(lines, ["api error 2", "worker info 2", "total 4"])
++
++    def test_no_matching_events_reports_zero(self):
++        code, lines = self.run_cli("--since", "2030-01-01")
++        self.assertEqual(code, 0)
++        self.assertEqual(lines, ["total 0"])
++
++    def test_option_may_precede_path(self):
++        out = io.StringIO()
++        code = main(["report", "--since", "2024-03-10", self.path], out=out)
++        self.assertEqual(code, 0)
++        self.assertEqual(out.getvalue().splitlines(), ["api error 1", "worker info 1", "total 2"])
++
++    def test_invalid_date_is_a_clean_usage_error(self):
++        err = io.StringIO()
++        with redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
++            main(["report", self.path, "--since", "2024-02-30"], out=io.StringIO())
++        self.assertEqual(ctx.exception.code, 2)
++        message = err.getvalue()
++        self.assertIn("invalid date/time '2024-02-30'", message)
++        self.assertNotIn("Traceback", message)
++
++    def test_garbage_date_is_a_clean_usage_error(self):
++        err = io.StringIO()
++        with redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
++            main(["report", self.path, "--since", "last tuesday"], out=io.StringIO())
++        self.assertEqual(ctx.exception.code, 2)
++        self.assertIn("invalid date/time 'last tuesday'", err.getvalue())
++        self.assertNotIn("Traceback", err.getvalue())
++
++    def test_missing_value_is_a_clean_usage_error(self):
++        err = io.StringIO()
++        with redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
++            main(["report", self.path, "--since"], out=io.StringIO())
++        self.assertEqual(ctx.exception.code, 2)
++        self.assertNotIn("Traceback", err.getvalue())
++
++
++class ParseSinceTest(unittest.TestCase):
++    def test_naive_datetime_becomes_utc(self):
++        self.assertEqual(parse_since("2024-03-10T08:00:00"), datetime(2024, 3, 10, 8, tzinfo=timezone.utc))
++
++    def test_offset_converted_to_utc(self):
++        self.assertEqual(parse_since("2024-03-10T08:00:00+09:00"), datetime(2024, 3, 9, 23, tzinfo=timezone.utc))
++
++
++class EventsSinceTest(unittest.TestCase):
++    def test_filters_mixed_naive_and_aware_events(self):
++        events = [
++            Event(ts=datetime(2024, 3, 9, 12), service="a", level="x"),
++            Event(ts=datetime(2024, 3, 11, 12, tzinfo=timezone.utc), service="a", level="x"),
++        ]
++        kept = list(events_since(events, datetime(2024, 3, 10, tzinfo=timezone.utc)))
++        self.assertEqual(kept, events[1:])
++
++
++if __name__ == "__main__":
++    unittest.main()

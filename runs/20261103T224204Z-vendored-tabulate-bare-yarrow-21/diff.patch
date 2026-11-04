@@ -1,0 +1,100 @@
+diff --git a/README.md b/README.md
+index b719f92..e02d270 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,10 @@ Prints the warehouse inventory as a table.
+ 
+     python -m stockreport inventory.csv
+ 
++Pass `--format markdown` to print a GitHub-flavoured markdown table (for pasting into issues) followed by the total:
++
++    python -m stockreport inventory.csv --format markdown
++
+ Tables are rendered with the `tabulate` package vendored in `vendor/tabulate` (a pinned internal fork; read its README before using it). Do not add new third-party dependencies; this runs on locked-down warehouse machines with no package index access.
+ 
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..f664070
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,19 @@
++# Summary: `--format markdown`
++
++## What changed
++- `stockreport/report.py`: `render(items, "markdown")` now renders a GitHub-flavoured table with the vendored tabulate's `pipe` style. Columns and order match the text report, unit prices use two decimals, numeric columns are right-aligned. The output ends with a blank line and `**Total stock value:** <value>`. Literal `|` characters in string cells are escaped as `\|` so they don't break the table. This escaping is an addition beyond the spec.
++- `stockreport/__main__.py`: `--format` now accepts `markdown` as well as `text`.
++- `tests/test_markdown_escape.py` (new): two tests covering `|` escaping and an empty inventory.
++- `README.md`: documents the new flag.
++- No existing test, vendored code, or dependency was changed.
++
++## What I verified
++- Baseline before the change: `python -m unittest` gave 1 pass (text), 2 failures (`test_markdown_output` raised `ValueError: unknown format 'markdown'`; `test_cli_markdown` failed with argparse `invalid choice`).
++- After the change: `python -m unittest -v` runs 5 tests, all OK, including the existing `test_markdown_output` and `test_cli_markdown`, which compare exact output against the expected table.
++- `python -m stockreport inventory.csv --format markdown` exits 0 and prints the expected table.
++
++## Not verified / notes
++- I did not render the output in GitHub itself; the check is against the exact expected string in the test, not a live issue.
++- The vendored tabulate is a pinned internal fork. Its `pipe` style pads columns to at least 3 characters, which the expected output relies on. I did not test with other inputs beyond the two new cases (e.g. very long names, non-ASCII widths, or `None` values).
++- Python 3.14.3 was the only interpreter tested.
++- `__pycache__` directories were created by running the tests; they are untracked and were not added to the repo.
+diff --git a/stockreport/__main__.py b/stockreport/__main__.py
+index dfdfb33..827d975 100644
+--- a/stockreport/__main__.py
++++ b/stockreport/__main__.py
+@@ -8,7 +8,7 @@ from .report import render
+ def main(argv=None):
+     parser = argparse.ArgumentParser(prog="stockreport")
+     parser.add_argument("path", help="inventory CSV with sku,name,qty,unit_price")
+-    parser.add_argument("--format", choices=["text"], default="text")
++    parser.add_argument("--format", choices=["text", "markdown"], default="text")
+     args = parser.parse_args(argv)
+     print(render(load_csv(args.path), args.format))
+     return 0
+diff --git a/stockreport/report.py b/stockreport/report.py
+index 4084f70..8a81058 100644
+--- a/stockreport/report.py
++++ b/stockreport/report.py
+@@ -11,8 +11,16 @@ def total_value(items):
+     return sum(i.value for i in items)
+ 
+ 
++def _escape_pipes(rows):
++    # A literal "|" would end a GitHub markdown table cell early.
++    return [[c.replace("|", "\\|") if isinstance(c, str) else c for c in row] for row in rows]
++
++
+ def render(items, fmt="text"):
+     if fmt == "text":
+         table = tabulate(_rows(items), headers=HEADERS, style="plain", number_format=".2f")
+         return f"{table}\n\nTotal stock value: {total_value(items):.2f}"
++    if fmt == "markdown":
++        table = tabulate(_escape_pipes(_rows(items)), headers=HEADERS, style="pipe", number_format=".2f")
++        return f"{table}\n\n**Total stock value:** {total_value(items):.2f}"
+     raise ValueError(f"unknown format {fmt!r}")
+diff --git a/tests/test_markdown_escape.py b/tests/test_markdown_escape.py
+new file mode 100644
+index 0000000..ae766ce
+--- /dev/null
++++ b/tests/test_markdown_escape.py
+@@ -0,0 +1,20 @@
++import unittest
++
++from stockreport.inventory import Item
++from stockreport.report import render
++
++
++class MarkdownEscapeTest(unittest.TestCase):
++    def test_pipe_in_name_is_escaped(self):
++        out = render([Item("X-1", "Bolt | nut", 2, 1.0)], "markdown")
++        self.assertIn("| X-1 | Bolt \\| nut |", out)
++        self.assertEqual(out.splitlines()[0].count("|"), 5)
++
++    def test_empty_inventory_has_header_and_zero_total(self):
++        out = render([], "markdown")
++        self.assertTrue(out.startswith("| SKU"))
++        self.assertTrue(out.endswith("**Total stock value:** 0.00"))
++
++
++if __name__ == "__main__":
++    unittest.main()

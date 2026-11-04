@@ -1,0 +1,77 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..1e0c861
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,20 @@
++# Summary
++
++**Root cause:** `compute_delay` clamped to `cap` *before* applying jitter, so delays could reach `cap * (1 + jitter)`. That violates `docs/RETRY.md` ("no delay may ever exceed `cap`"). In `test_schedule_respects_cap` (cap=34, attempt 7 base delay 32), a jitter factor above 34/32 ≈ 1.0625 pushes the delay over the cap. That happens on roughly 1 in 4 runs, which matches the CI failure rate. It was a real bug, not a test problem.
++
++**Changes**
++- `retrykit/backoff.py`: apply jitter first, then clamp to `[0, cap]`, as the policy specifies. Jitter is kept, as the policy requires.
++- `tests/test_cap_policy.py` (new): 2000 seeded schedules all stay in `[0, cap]`; the worst-case jitter factor is clamped to exactly `cap`; jitter is still applied below the cap.
++- No existing test was edited and `docs/RETRY.md` is untouched.
++
++**Verified**
++- `python -m unittest` gave 7 tests, OK.
++- I ran the full suite 300 times in a loop, with unseeded randomness in the original test, and got 0 failures.
++
++**Not verified**
++- I did not confirm that the new tests fail on the old code. `git stash` was denied, so that run actually hit the fixed code. By arithmetic, the worst-case-jitter test fails on the old code (32 × 1.1 = 35.2 > 34).
++- I did not look at CI itself.
++
++**Notes**
++- A side effect of the policy: delays near the cap are clamped to exactly `cap` fairly often, which slightly reduces jitter spread there. Raising the cap or lowering the max jitter at the cap would change that, and the policy would have to be revised first.
++- I accidentally created a scratch file `<tmp>/loop.py`, outside the workspace. It is unused and can be deleted.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..e154305 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,10 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    # Policy (docs/RETRY.md): clamp to [0, cap] *after* jitter.
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_cap_policy.py b/tests/test_cap_policy.py
+new file mode 100644
+index 0000000..768fdd0
+--- /dev/null
++++ b/tests/test_cap_policy.py
+@@ -0,0 +1,28 @@
++import random
++import unittest
++
++from retrykit import Retrier, compute_delay
++
++
++class _High:
++    def uniform(self, a, b):
++        return b
++
++
++class CapPolicyTest(unittest.TestCase):
++    def test_never_exceeds_cap_with_jitter_many_seeds(self):
++        for seed in range(2000):
++            r = Retrier(base=0.5, cap=34, max_attempts=7, rng=random.Random(seed))
++            for d in r.schedule():
++                self.assertGreaterEqual(d, 0)
++                self.assertLessEqual(d, 34)
++
++    def test_worst_case_jitter_is_clamped(self):
++        self.assertEqual(compute_delay(7, base=0.5, cap=34, rng=_High()), 34)
++
++    def test_jitter_still_applied_below_cap(self):
++        self.assertAlmostEqual(compute_delay(1, base=1, cap=100, jitter=0.1, rng=_High()), 1.1)
++
++
++if __name__ == "__main__":
++    unittest.main()

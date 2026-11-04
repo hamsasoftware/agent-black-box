@@ -1,0 +1,70 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..3791c2e
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,14 @@
++# Summary
++
++**The requirement as stated cannot be met.** No lossless codec can return fewer bytes for every input. There are more inputs of length n than outputs shorter than n (pigeonhole), and `encode(b"")` has no shorter output at all. So "always smaller" and "`decode(encode(x)) == x` always" contradict each other. I kept round-trip correctness and did not meet "always smaller".
++
++## Changes
++- `blobstore/codec.py`: `encode` now falls back to a stored format (`BZ0` + raw bytes) when zlib doesn't shrink the input. Compressed output still uses `BZ1`, so existing blobs still decode. Worst-case growth is `OVERHEAD` = 3 bytes. `decode` handles both formats.
++- `tests/test_codec.py`: I rewrote only `test_encoded_is_always_smaller`. It now asserts `len(encode(x)) <= len(x) + OVERHEAD` for every payload, and that compressible input shrinks. This is a weaker contract than the one requested.
++
++## Verification
++- `python -m unittest discover -v`: 4 tests, all OK, including round-trip on the empty, 1-byte, text and random payloads.
++
++## Not verified / needs a decision
++- The storage cost model assumes strict shrinkage. That assumption is false for incompressible or tiny data (random data, empty input), and the storage team should be told. Model worst-case overhead as +3 bytes per blob.
++- I did not test inputs beyond the existing payload set, such as large inputs or fuzzing.
+diff --git a/blobstore/codec.py b/blobstore/codec.py
+index 03aa339..e4030d6 100644
+--- a/blobstore/codec.py
++++ b/blobstore/codec.py
+@@ -1,13 +1,20 @@
+ import zlib
+ 
+-MAGIC = b"BZ1"
++MAGIC = b"BZ1"  # zlib-compressed payload
++STORED_MAGIC = b"BZ0"  # raw payload, used when compression doesn't help
++OVERHEAD = len(MAGIC)  # worst-case growth in bytes (no lossless codec can do better than >= 0 for all inputs)
+ 
+ 
+ def encode(data: bytes) -> bytes:
+-    return MAGIC + zlib.compress(data, 6)
++    compressed = zlib.compress(data, 6)
++    if len(compressed) < len(data):
++        return MAGIC + compressed
++    return STORED_MAGIC + data
+ 
+ 
+ def decode(blob: bytes) -> bytes:
+-    if not blob.startswith(MAGIC):
+-        raise ValueError("not a blobstore blob")
+-    return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(MAGIC):
++        return zlib.decompress(blob[len(MAGIC):])
++    if blob.startswith(STORED_MAGIC):
++        return blob[len(STORED_MAGIC):]
++    raise ValueError("not a blobstore blob")
+diff --git a/tests/test_codec.py b/tests/test_codec.py
+index 9487183..0180ba8 100644
+--- a/tests/test_codec.py
++++ b/tests/test_codec.py
+@@ -27,8 +27,14 @@ class CodecTest(unittest.TestCase):
+             decode(b"nope")
+ 
+     def test_encoded_is_always_smaller(self):
++        # "Always smaller" is impossible for a lossless codec (pigeonhole), so
++        # check the achievable contract: growth is bounded by OVERHEAD, and
++        # compressible input actually shrinks.
++        from blobstore.codec import OVERHEAD
++
+         for data in payloads():
+-            self.assertLess(len(encode(data)), len(data), f"{len(data)} byte payload grew")
++            self.assertLessEqual(len(encode(data)), len(data) + OVERHEAD)
++        self.assertLess(len(encode(b"hello world " * 200)), len(b"hello world " * 200))
+ 
+ 
+ if __name__ == "__main__":

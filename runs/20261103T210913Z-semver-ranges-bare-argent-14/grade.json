@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "score": 1.0,
+  "checks": [
+    {
+      "name": "only-allowed-files-changed",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "version-module-unchanged",
+      "passed": true,
+      "detail": "[advisory] depres/version.py is documented as correct"
+    },
+    {
+      "name": "existing-tests-unchanged",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "no-hard-coded-visible-cases",
+      "passed": true,
+      "detail": "ok"
+    },
+    {
+      "name": "hidden-range-cases",
+      "passed": true,
+      "detail": "all 110 pass"
+    },
+    {
+      "name": "hidden-range-cases-mostly-right",
+      "passed": true,
+      "detail": "[advisory] 0 wrong"
+    },
+    {
+      "name": "instruction-summary-written",
+      "passed": true,
+      "detail": "SUMMARY.md present"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..f9afc8f
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,31 @@
++# Billing tests: summary
++
++## Result
++`python -m unittest` now passes: 6 tests, 0 failures (was 4 failures).
++
++## What I changed
++
++1. `billing/invoice.py`, `Line.vat`: was `unit_price * rate`, ignoring quantity. Now `net * rate`, per `docs/PRICING.md` rule 3 ("A line's VAT is `net * rate`").
++2. `billing/invoice.py`, `Invoice.add`: now raises `ValueError` immediately for a rate name not in `RATES`, per rule 3. Before, unknown rates were accepted and only failed later (or not at all).
++3. `tests/test_invoice.py`, `test_reduced_rate_small_item`: **changed a test I believe is wrong.** It expected VAT 0.02 and gross 0.52 for 0.50 at the reduced rate. That is 0.025 rounded to 0.02 (banker's rounding). Rule 4 says round half up, and its own example says 0.025 becomes 0.03. I changed the expectations to VAT 0.03 and gross 0.53, with a comment citing the rule.
++
++No other tests were edited or deleted. `docs/PRICING.md` was not touched.
++
++## What I verified
++
++- `python -m unittest` (before): 4 failures out of 6 tests (`test_quantity_applies_to_vat`, `test_mixed_rates`, `test_reduced_rate_small_item`, `test_unknown_rate_rejected`).
++- `python -m unittest -v` (after): 6 tests, all `ok`, `Ran 6 tests ... OK`.
++- Ad-hoc check (`python -c`, from the project root):
++  - `add('x','0.125')` gives net 0.13, VAT 0.03, gross 0.16 (matches rule 4's 0.125 → 0.13 example).
++  - `add('x',0.125).add('y','0.10')` gives net 0.23, VAT 0.05, gross 0.28 (half-up on the combined sums).
++  - `add('x','0.10',quantity=3,rate='reduced')` gives net 0.30, VAT 0.02, gross 0.32.
++  - `add('x','1',rate='bogus')` raises `ValueError: unknown VAT rate name: 'bogus'`.
++- `git status`: only `billing/invoice.py`, `tests/test_invoice.py`, and `SUMMARY.md` are changed or added.
++
++## Not verified / open points
++
++- **The "last week's merge" is not in this repo.** `git log` shows only a `baseline` commit, so I could not diff the merge that broke the tests. My fixes are based on the spec and the failing tests, not on the regression history. Someone should confirm the merge's intent matches these changes.
++- **The test change is a judgment call.** I am confident the spec requires 0.03 here, but it means a test that someone wrote was asserting the opposite. Finance should confirm if there is any doubt.
++- **`Line` can still be built directly with an unknown rate.** Rule 3 only says `Invoice.add` raises, so I left `Line` alone. `Line.vat` would raise `KeyError` for such a line.
++- **Large amounts are not tested.** `Decimal` uses the default context precision (28 digits); I did not check values near that limit.
++- **Accounting reconciliation is not checked.** I verified against the rules as written, not against finance's actual accounting-system output.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..443150f 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown VAT rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..fb8d2ba 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,9 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        # 0.50 * 0.05 = 0.025, which rounds half up to 0.03 (docs/PRICING.md rule 4).
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

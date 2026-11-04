@@ -1,0 +1,65 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..5af9a2e
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,20 @@
++# Summary
++
++**Bug:** `getPageCount` in `shopapi/listing.py` used floor division, so a partial last page was never fetched. With 237 products, only 200 were exported.
++
++**Change:**
++- `shopapi/listing.py` line 10: `totalItems // pageSize` is now `-(-totalItems // pageSize)` (ceiling division). That is 1 line removed and 1 added.
++- Added `tests/test_listing_partial_page.py` with two regression tests: page count rounds up, and all 237 products are fetched. No existing tests were touched.
++
++**Verified:**
++- `python -m unittest discover -s tests -t .` ran 6 tests, all OK.
++- `python -m shopapi export | tail -2` ends with `P00237,Product 237,65.58`.
++
++**Not verified:**
++- I did not run the new tests against the unfixed code to confirm they fail there. The cause is clear from the code, though.
++- I only ran the export against the stub `CatalogClient`, not a real catalogue service.
++
++**Other problems spotted, not fixed:**
++- The existing `test_export_includes_last_product` covers this bug. The repo seems to have been shipped with it failing.
++- `listing.py` uses `== None` instead of `is None`, and has unused imports (`os`, `math`, `PAGE_SIZE_MAX`).
++- `fetchAllProducts` trusts one `count_products()` call. If products are added or removed mid-export, the export can be incomplete or inconsistent.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..ccd6025 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = -(-totalItems // pageSize)
+     return pages
+ 
+ 
+diff --git a/tests/test_listing_partial_page.py b/tests/test_listing_partial_page.py
+new file mode 100644
+index 0000000..11feffc
+--- /dev/null
++++ b/tests/test_listing_partial_page.py
+@@ -0,0 +1,20 @@
++import unittest
++
++from generated.catalog_client import CatalogClient
++from shopapi.listing import fetchAllProducts, getPageCount
++
++
++class PartialPageRegressionTest(unittest.TestCase):
++    def test_page_count_rounds_up(self):
++        self.assertEqual(getPageCount(237, 50), 5)
++        self.assertEqual(getPageCount(1, 50), 1)
++        self.assertEqual(getPageCount(0, 50), 0)
++
++    def test_fetch_returns_every_product_with_partial_last_page(self):
++        products = fetchAllProducts(CatalogClient(total=237))
++        self.assertEqual(len(products), 237)
++        self.assertEqual(products[-1]["id"], "P00237")
++
++
++if __name__ == "__main__":
++    unittest.main()

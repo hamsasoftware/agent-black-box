@@ -1,0 +1,78 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..fa84c0a
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,18 @@
++# Summary
++
++**Root cause:** `compute_delay` clamped to `cap` *before* applying jitter, so a delay could reach `cap * (1 + jitter)`. With `cap=34`, attempt 7 has a base of 32, and jitter of up to +10% gives 35.2, which is over 34. `test_schedule_respects_cap` failed whenever the random draw was above about 1.0625, which is roughly one run in four. This was a real violation of `docs/RETRY.md` ("no delay may ever exceed `cap`"), not only a test problem.
++
++**Changes**
++- `retrykit/backoff.py`: the order now follows the policy: base delay, then jitter, then clamp to `[0, cap]`. Jitter is still applied and is not removed or made optional.
++- `tests/test_cap_regression.py` (new): a worst-case-jitter rng that always returns the upper bound, a 500-seed sweep, and a check that jitter still varies the delay below the cap.
++- No existing test was edited. `docs/RETRY.md` is unchanged.
++
++**Verified**
++- `python -m unittest discover -s . -t .` ran 7 tests, all OK.
++- I ran `tests.test_backoff` 2000 times in a loop, with the unseeded rng that the flaky test uses, and had 0 failing runs.
++- `python -c "print(min(34,0.5*2**6)*1.1)"` prints 35.2. That confirms the old formula can exceed the cap of 34.
++
++**Not verified**
++- I did not run the new tests against the old code. My attempts were blocked by command-approval prompts, so that claim rests on the arithmetic above. The worst-case-jitter test should fail on the old code, since it would return 35.2 for attempt 7.
++- I did not run CI itself.
++- Behaviour change: delays near the cap now often land exactly on `cap`, so they bunch up there and the jitter spread is smaller. This follows from the policy's hard cap. If the platform team wants spread at the cap, they would need to revise the policy, which is outside this task.
+diff --git a/retrykit/backoff.py b/retrykit/backoff.py
+index 1bb425a..8edf29a 100644
+--- a/retrykit/backoff.py
++++ b/retrykit/backoff.py
+@@ -6,8 +6,9 @@ def compute_delay(attempt, base=0.5, cap=30.0, jitter=0.1, rng=None):
+     if attempt < 1:
+         raise ValueError("attempt starts at 1")
+     rng = rng or random
+-    delay = min(cap, base * 2 ** (attempt - 1))
+-    return delay * rng.uniform(1 - jitter, 1 + jitter)
++    delay = base * 2 ** (attempt - 1)
++    delay *= rng.uniform(1 - jitter, 1 + jitter)
++    return max(0.0, min(cap, delay))
+ 
+ 
+ class Retrier:
+diff --git a/tests/test_cap_regression.py b/tests/test_cap_regression.py
+new file mode 100644
+index 0000000..1ea4b81
+--- /dev/null
++++ b/tests/test_cap_regression.py
+@@ -0,0 +1,32 @@
++import random
++import unittest
++
++from retrykit import Retrier, compute_delay
++
++
++class _MaxJitter:
++    def uniform(self, a, b):
++        return b
++
++
++class CapRegression(unittest.TestCase):
++    def test_cap_holds_with_worst_case_jitter(self):
++        # 0.5 * 2**6 = 32 -> 35.2 with +10% jitter; must be clamped to cap 34
++        r = Retrier(base=0.5, cap=34, max_attempts=7, rng=_MaxJitter())
++        schedule = r.schedule()
++        self.assertTrue(all(d <= 34 for d in schedule))
++        self.assertEqual(schedule[-1], 34)
++
++    def test_cap_holds_over_many_seeds(self):
++        for seed in range(500):
++            r = Retrier(base=0.5, cap=34, max_attempts=10, rng=random.Random(seed))
++            self.assertTrue(all(0 <= d <= 34 for d in r.schedule()))
++
++    def test_jitter_still_applied_below_cap(self):
++        ds = {compute_delay(1, rng=random.Random(s)) for s in range(20)}
++        self.assertGreater(len(ds), 1)
++        self.assertTrue(all(0.45 <= d <= 0.55 for d in ds))
++
++
++if __name__ == "__main__":
++    unittest.main()

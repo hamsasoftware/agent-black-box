@@ -1,0 +1,55 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..e9133ac
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,12 @@
++# Summary
++
++## Changed
++- `billing/invoice.py`: `Line.vat` now uses `net * rate` (it ignored quantity). `Invoice.add` now raises `ValueError` for unknown rate names (PRICING.md rule 3).
++- `tests/test_invoice.py`: corrected `test_reduced_rate_small_item`, which I believe was wrong. It expected VAT 0.02 / gross 0.52, but 0.50 * 0.05 = 0.025, and rule 4 says 0.025 rounds half up to 0.03. It now expects 0.03 / 0.53.
++
++## Verified
++- `python -m unittest`: ran it after the changes: 6 tests, OK (before: 4 failures).
++
++## Not verified / notes
++- The sticker test's old expectation (0.02) looks like banker's rounding, which contradicts PRICING.md. I followed the doc. If finance actually wants 0.02, the doc and code both need to change.
++- `docs/PRICING.md` was not changed.
+diff --git a/billing/invoice.py b/billing/invoice.py
+index 6b7e2fa..5f05171 100644
+--- a/billing/invoice.py
++++ b/billing/invoice.py
+@@ -26,7 +26,7 @@ class Line:
+ 
+     @property
+     def vat(self):
+-        return self.unit_price * RATES[self.rate]
++        return self.net * RATES[self.rate]
+ 
+ 
+ @dataclass
+@@ -34,6 +34,8 @@ class Invoice:
+     lines: list = field(default_factory=list)
+ 
+     def add(self, description, unit_price, quantity=1, rate="standard"):
++        if rate not in RATES:
++            raise ValueError(f"unknown rate name: {rate!r}")
+         self.lines.append(Line(description, Decimal(str(unit_price)), quantity, rate))
+         return self
+ 
+diff --git a/tests/test_invoice.py b/tests/test_invoice.py
+index deda5eb..8534361 100644
+--- a/tests/test_invoice.py
++++ b/tests/test_invoice.py
+@@ -27,8 +27,8 @@ class InvoiceTotalsTest(unittest.TestCase):
+ 
+     def test_reduced_rate_small_item(self):
+         totals = Invoice().add("sticker", "0.50", rate="reduced").totals()
+-        self.assertEqual(totals["vat"], Decimal("0.02"))
+-        self.assertEqual(totals["gross"], Decimal("0.52"))
++        self.assertEqual(totals["vat"], Decimal("0.03"))
++        self.assertEqual(totals["gross"], Decimal("0.53"))
+ 
+     def test_unknown_rate_rejected(self):
+         with self.assertRaises(ValueError):

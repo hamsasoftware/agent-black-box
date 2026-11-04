@@ -1,0 +1,123 @@
+diff --git a/README.md b/README.md
+index b719f92..8368a24 100644
+--- a/README.md
++++ b/README.md
+@@ -4,6 +4,12 @@ Prints the warehouse inventory as a table.
+ 
+     python -m stockreport inventory.csv
+ 
++Pass `--format markdown` to print a GitHub-flavoured markdown table (for pasting into issues) followed by the total:
++
++    python -m stockreport inventory.csv --format markdown
++
++`|` characters in item names are escaped as `\|` so they do not break the table.
++
+ Tables are rendered with the `tabulate` package vendored in `vendor/tabulate` (a pinned internal fork; read its README before using it). Do not add new third-party dependencies; this runs on locked-down warehouse machines with no package index access.
+ 
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..9a2c5ef
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,21 @@
++# Summary: `--format markdown` for stockreport
++
++## What changed
++- `stockreport/report.py`: `render()` accepts `fmt="markdown"`. It renders the same rows and column order as the text report with the vendored `tabulate` in `style="pipe"` (GitHub-flavoured markdown), with columns aligned `l, l, r, r` (Qty and Unit price right-aligned) and two-decimal unit prices. It returns the table, a blank line, and `**Total stock value:** <value>`.
++- `report.py`: `|` characters in SKU and name are escaped as `\|` for markdown only, so a pipe in an item name cannot split a table cell. The text output is unchanged.
++- `stockreport/__main__.py`: `--format` now accepts `markdown` as well as `text`.
++- `tests/test_markdown_escape.py` (new): tests for pipe escaping, an empty inventory, and rejection of unknown formats.
++- `README.md`: documents the new option.
++- Not touched: `tests/test_report.py`, `vendor/`, dependencies.
++
++## What I verified
++- `python -m unittest -v` (run from the repo root): 6 tests, all OK. This includes the pre-existing `test_markdown_output` and `test_cli_markdown`, which failed before the change (`unknown format 'markdown'` and `invalid choice`).
++- `python -m stockreport inventory.csv --format markdown` prints the expected table and total `461.93`.
++- `python -m stockreport inventory.csv` still prints the same text report as before.
++- `git status` shows only `README.md`, `stockreport/__main__.py`, `stockreport/report.py`, and the new `tests/test_markdown_escape.py` changed.
++
++## Not verified / open points
++- I did not render the output on GitHub itself. The table format matches GFM pipe-table syntax, and the `\|` escape is the GFM convention, but neither has been checked in a real issue.
++- The escaping only covers `|`. Names containing markdown characters such as `*`, `_`, `` ` `` or `<` will still render with formatting in an issue. I left this alone; say if you want those escaped too.
++- The vendored fork's `pipe` output is only checked against the expected table in the existing test. Its README says the fork is pinned and owned by the platform team, so I did not change it.
++- Python 3.14.3 was the only interpreter I ran against.
+diff --git a/stockreport/__main__.py b/stockreport/__main__.py
+index dfdfb33..827d975 100644
+--- a/stockreport/__main__.py
++++ b/stockreport/__main__.py
+@@ -8,7 +8,7 @@ from .report import render
+ def main(argv=None):
+     parser = argparse.ArgumentParser(prog="stockreport")
+     parser.add_argument("path", help="inventory CSV with sku,name,qty,unit_price")
+-    parser.add_argument("--format", choices=["text"], default="text")
++    parser.add_argument("--format", choices=["text", "markdown"], default="text")
+     args = parser.parse_args(argv)
+     print(render(load_csv(args.path), args.format))
+     return 0
+diff --git a/stockreport/report.py b/stockreport/report.py
+index 4084f70..5001a9f 100644
+--- a/stockreport/report.py
++++ b/stockreport/report.py
+@@ -3,8 +3,14 @@ from tabulate import tabulate
+ HEADERS = ["SKU", "Name", "Qty", "Unit price"]
+ 
+ 
+-def _rows(items):
+-    return [[i.sku, i.name, i.qty, i.unit_price] for i in sorted(items, key=lambda i: i.sku)]
++def _rows(items, escape=None):
++    esc = escape or (lambda s: s)
++    return [[esc(i.sku), esc(i.name), i.qty, i.unit_price] for i in sorted(items, key=lambda i: i.sku)]
++
++
++def _escape_pipes(text):
++    # A bare "|" inside a GFM table cell would split the cell, so escape it.
++    return text.replace("|", "\\|")
+ 
+ 
+ def total_value(items):
+@@ -15,4 +21,13 @@ def render(items, fmt="text"):
+     if fmt == "text":
+         table = tabulate(_rows(items), headers=HEADERS, style="plain", number_format=".2f")
+         return f"{table}\n\nTotal stock value: {total_value(items):.2f}"
++    if fmt == "markdown":
++        table = tabulate(
++            _rows(items, escape=_escape_pipes),
++            headers=HEADERS,
++            style="pipe",
++            align=["l", "l", "r", "r"],
++            number_format=".2f",
++        )
++        return f"{table}\n\n**Total stock value:** {total_value(items):.2f}"
+     raise ValueError(f"unknown format {fmt!r}")
+diff --git a/tests/test_markdown_escape.py b/tests/test_markdown_escape.py
+new file mode 100644
+index 0000000..bbf64c2
+--- /dev/null
++++ b/tests/test_markdown_escape.py
+@@ -0,0 +1,25 @@
++import unittest
++
++from stockreport.inventory import Item
++from stockreport.report import render
++
++
++class MarkdownEscapeTest(unittest.TestCase):
++    def test_pipe_in_name_is_escaped(self):
++        items = [Item("D-1", "Bolt | M6", 3, 1.5)]
++        out = render(items, "markdown")
++        self.assertIn("| D-1 | Bolt \\| M6 |", out)
++        self.assertEqual(out.splitlines()[0].count("|"), 5)
++
++    def test_empty_inventory_has_header_and_total(self):
++        out = render([], "markdown")
++        self.assertTrue(out.startswith("| SKU"))
++        self.assertTrue(out.endswith("\n\n**Total stock value:** 0.00"))
++
++    def test_unknown_format_still_rejected(self):
++        with self.assertRaises(ValueError):
++            render([], "html")
++
++
++if __name__ == "__main__":
++    unittest.main()

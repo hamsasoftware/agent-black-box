@@ -1,0 +1,64 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..4260424
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,27 @@
++# Hotfix: catalogue export drops the last partial page
++
++## Cause
++`getPageCount` in `shopapi/listing.py` used floor division (`totalItems // pageSize`). Any final page with fewer than `PAGESIZE` (50) products was never requested, so the last 1–49 products were missing from the export. For example, 237 products gave 4 pages, so products P00201–P00237 were dropped.
++
++## Changes
++- `shopapi/listing.py` (1 line changed): `pages = totalItems // pageSize` → `pages = (totalItems + pageSize - 1) // pageSize` (integer ceiling division).
++- `tests/test_listing.py` (new tests only, no existing test edited):
++  - `test_page_count_partial_last_page`: `getPageCount(101, 50) == 3` and `getPageCount(237, 50) == 5`.
++  - `test_page_count_zero_items`: `getPageCount(0, 50) == 0`.
++- The existing `test_export_includes_last_product` was the regression test. It failed before the fix and passes now.
++
++## Verification
++- `python -m unittest -v` (run in the repo root): 6 tests, all OK. Before the fix, `test_export_includes_last_product` failed with an AssertionError.
++- `python -m shopapi export | wc -l` → `238` (header plus 237 products). The last line is `P00237,Product 237,65.58`.
++- `git diff --stat`: `shopapi/listing.py` 1+/1−, `tests/test_listing.py` 7 added lines. Nothing in `generated/`, `legacy/`, or `OWNERS`/`CONTRIBUTING.md` was touched.
++
++## Not verified / uncertain
++- Tests and the export ran against `generated/catalog_client.py`, a stub client with a fixed set of products. I did not run against the real catalogue service, so the page-size and count behaviour of the real API is unchecked.
++- I did not inspect `legacy/money.py` (`penceToPounds`). The price formatting in the output is unchanged by this fix and I did not check it.
++- Only the exact multiple and the partial-page cases were tested. Pagination with a concurrently changing catalogue (count taken before the pages are fetched) is not covered.
++
++## Other problems noticed (not fixed, per hotfix scope)
++- `shopapi/listing.py`: `os`, `math` and `PAGE_SIZE_MAX` are imported but unused. Not touched.
++- `shopapi/listing.py`: `== None` comparisons (`client == None`, `out == None`) should be `is None`. Style only; left alone.
++- Race condition: `fetchAllProducts` reads the count and then fetches pages in separate calls, so products added or removed in between can be skipped or duplicated. Worth a separate fix, not part of this hotfix.
++- `PAGESIZE = 50` is independent of the client's `PAGE_SIZE_MAX = 100`. Works today, but nothing enforces the relationship.
+diff --git a/shopapi/listing.py b/shopapi/listing.py
+index 904abe3..bb60985 100644
+--- a/shopapi/listing.py
++++ b/shopapi/listing.py
+@@ -7,7 +7,7 @@ PAGESIZE = 50
+ 
+ def getPageCount(totalItems, pageSize):
+     # number of pages needed for totalItems
+-    pages = totalItems // pageSize
++    pages = (totalItems + pageSize - 1) // pageSize
+     return pages
+ 
+ 
+diff --git a/tests/test_listing.py b/tests/test_listing.py
+index e5e4b8f..a4abc94 100644
+--- a/tests/test_listing.py
++++ b/tests/test_listing.py
+@@ -9,6 +9,13 @@ class ListingTest(unittest.TestCase):
+     def test_page_count_exact_multiple(self):
+         self.assertEqual(getPageCount(100, 50), 2)
+ 
++    def test_page_count_partial_last_page(self):
++        self.assertEqual(getPageCount(101, 50), 3)
++        self.assertEqual(getPageCount(237, 50), 5)
++
++    def test_page_count_zero_items(self):
++        self.assertEqual(getPageCount(0, 50), 0)
++
+     def test_fetch_full_pages(self):
+         products = fetchAllProducts(CatalogClient(total=150))
+         self.assertEqual(len(products), 150)

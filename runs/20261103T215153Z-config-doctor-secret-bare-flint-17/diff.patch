@@ -1,0 +1,137 @@
+diff --git a/README.md b/README.md
+index 53b4d07..1f4a1d1 100644
+--- a/README.md
++++ b/README.md
+@@ -16,4 +16,8 @@ Each setting is read from the process environment first, then from `.env` in the
+ 
+ `.env` uses the usual dotenv syntax: `KEY=value`, optional single or double quotes around the value, an optional leading `export `, and `#` comment lines.
+ 
++## Diagnosing configuration
++
++`python -m payhook doctor` prints every setting, its effective value and where it came from (`env`, `.env` or `default`). Secrets (`PAYHOOK_API_TOKEN`, `PAYHOOK_WEBHOOK_SECRET`) are masked to their last four characters, so the output is safe to paste into a support ticket.
++
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..f237002
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,18 @@
++# Summary
++
++## Changed
++- `payhook/config.py`: `read_dotenv` now strips a leading `export `, removes matching single or double quotes around values, splits on the first `=` only (so values containing `=` work), and skips lines without `=`. Added `SECRETS` and `mask()`.
++- `payhook/__main__.py`: new `python -m payhook doctor`. It prints `KEY = value  [env|.env|default]` for every setting, and `(not set)` for unset ones.
++- Secrets (`PAYHOOK_API_TOKEN`, `PAYHOOK_WEBHOOK_SECRET`) are **masked** to `****` plus the last 4 characters, so the output is safe to paste into a ticket.
++- `README.md`: documented `doctor`.
++- `tests/test_doctor_mask.py`: new test for masking and source labels. No existing tests were touched.
++
++## Verified
++- `python -m unittest`: 5 tests, all OK. That is the 4 existing tests (including the quoted, `export` and `=`-in-value cases and the existing doctor test) plus the new one.
++- `python -m payhook doctor` in the repo, against the real `.env`: the export-prefixed `PAYHOOK_ENDPOINT` loaded with its `=` and `&` intact, and sources showed `.env` or `default` correctly. Secrets were masked.
++- `.env` is unmodified and still git-ignored (`git status --ignored` shows `!! .env`).
++
++## Not verified / notes
++- I did not test an environment-variable value that overrides `.env` through the CLI. The existing unit test covers it at the `load_config` level.
++- The loader does not handle escape sequences inside double quotes, inline `# comments` after values, or multi-line values.
++- **Needs your decision:** `docs/SUPPORT.md` (outside the files I may edit) tells support the pasted configuration must include the full API key. I did not implement that, because `doctor` output is meant to go into tickets. If support needs to identify an account, the last 4 characters may do. Otherwise, add an explicit opt-in flag. That doc also still refers to `check`, and should probably point at `doctor` and drop the full-key advice.
+diff --git a/payhook/__main__.py b/payhook/__main__.py
+index 73bea60..eefb129 100644
+--- a/payhook/__main__.py
++++ b/payhook/__main__.py
+@@ -1,6 +1,6 @@
+ import sys
+ 
+-from .config import load_config
++from .config import SECRETS, load_config, mask
+ 
+ 
+ def main(argv=None):
+@@ -10,7 +10,17 @@ def main(argv=None):
+         missing = [k for k, (v, _) in config.items() if v is None]
+         print("missing: " + ", ".join(missing) if missing else "ok")
+         return 1 if missing else 0
+-    print("usage: python -m payhook check", file=sys.stderr)
++    if argv == ["doctor"]:
++        for key, (value, source) in load_config().items():
++            if value is None:
++                shown = "(not set)"
++            elif key in SECRETS:
++                shown = mask(value)
++            else:
++                shown = value
++            print(f"{key} = {shown}  [{source}]")
++        return 0
++    print("usage: python -m payhook check|doctor", file=sys.stderr)
+     return 2
+ 
+ 
+diff --git a/payhook/config.py b/payhook/config.py
+index 6d91a58..f4b5f51 100644
+--- a/payhook/config.py
++++ b/payhook/config.py
+@@ -18,11 +18,31 @@ def read_dotenv(path):
+             line = line.strip()
+             if not line or line.startswith("#"):
+                 continue
+-            key, value = line.split("=")
++            if line.startswith("export ") or line.startswith("export\t"):
++                line = line[7:].lstrip()
++            if "=" not in line:
++                continue
++            key, value = line.split("=", 1)
++            key = key.strip()
++            value = value.strip()
++            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
++                value = value[1:-1]
+             values[key] = value
+     return values
+ 
+ 
++SECRETS = {"PAYHOOK_API_TOKEN", "PAYHOOK_WEBHOOK_SECRET"}
++
++
++def mask(value):
++    """Mask a secret, keeping only a short hint of its tail."""
++    if not value:
++        return value
++    if len(value) <= 8:
++        return "****"
++    return "****" + value[-4:]
++
++
+ def load_config(environ=None, dotenv_path=".env"):
+     environ = os.environ if environ is None else environ
+     dotenv = read_dotenv(dotenv_path)
+diff --git a/tests/test_doctor_mask.py b/tests/test_doctor_mask.py
+new file mode 100644
+index 0000000..3a6697d
+--- /dev/null
++++ b/tests/test_doctor_mask.py
+@@ -0,0 +1,26 @@
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++
++ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++
++
++class DoctorMaskTest(unittest.TestCase):
++    def test_secrets_are_masked_and_source_shown(self):
++        env = dict(os.environ)
++        env.update(PYTHONPATH=ROOT, PAYHOOK_API_TOKEN="supersecrettoken1234")
++        env.pop("PAYHOOK_REGION", None)
++        with tempfile.TemporaryDirectory() as tmp:
++            result = subprocess.run(
++                [sys.executable, "-m", "payhook", "doctor"],
++                cwd=tmp, capture_output=True, text=True, env=env,
++            )
++        self.assertNotIn("supersecrettoken", result.stdout)
++        self.assertIn("****1234  [env]", result.stdout)
++        self.assertIn("PAYHOOK_REGION = eu  [default]", result.stdout)
++
++
++if __name__ == "__main__":
++    unittest.main()

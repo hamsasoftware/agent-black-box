@@ -1,0 +1,272 @@
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..9897b70
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,14 @@
++# Summary
++
++**Changed**
++- `depres/ranges.py`: implemented `satisfies()` and `max_satisfying()` per `docs/RANGES.md`. This covers `||` sets, primitive operators, X-ranges and partial versions, hyphen, tilde and caret ranges, the prerelease rule, and `ValueError` for invalid ranges or versions. `max_satisfying` returns the original string.
++- `tests/test_ranges_spec.py` (new): covers the doc's partial-version table, hyphen, tilde, caret and prerelease examples, and invalid inputs. No existing test was edited.
++
++**Verified**
++- `python -m unittest` ran 11 tests, all OK. That includes the 8 in `tests/test_ranges.py`.
++- The new tests were written from the doc's examples. The first run exposed a bug (plain `1.2.3` handled as partial), which I fixed.
++
++**Not verified / unsure**
++- I did not compare against the npm `semver` package.
++- Behavior the doc doesn't specify: prerelease tags on partial versions (e.g. `1.2-beta`) are rejected as invalid. `>*` matches nothing, `<*` matches nothing, and `>=*` and `<=*` match everything (release versions only). Ranges like `1.2.3 - ` or `- 1` raise `ValueError`.
++- No other files needed changes.
+diff --git a/depres/ranges.py b/depres/ranges.py
+index 248cdcd..1db497e 100644
+--- a/depres/ranges.py
++++ b/depres/ranges.py
+@@ -1,9 +1,191 @@
++import re
++
+ from .version import Version
+ 
++_OPS = ("<=", ">=", "<", ">", "=", "~", "^")
++_PARTIAL = re.compile(r"^v?([xX*]|\d+)(?:\.([xX*]|\d+)(?:\.([xX*]|\d+))?)?$")
++_WILD = ("x", "X", "*")
++# Lowest possible version: "< NOTHING" matches nothing.
++_NOTHING = ("<", Version(0, 0, 0, ("0",)))
++
++
++def _v(major, minor=0, patch=0):
++    return Version(major, minor, patch)
++
++
++def _parse_partial(text):
++    """Return (major, minor, patch, full_version_or_None); None means wildcard/missing."""
++    match = _PARTIAL.match(text)
++    if match:
++        parts = []
++        for group in match.groups():
++            if group is None or group in _WILD:
++                parts.append(None)
++            else:
++                parts.append(int(group))
++        # A wildcard may not be followed by a number.
++        for i in range(2):
++            if parts[i] is None and parts[i + 1] is not None:
++                raise ValueError(f"invalid range: {text!r}")
++        if parts[2] is None:
++            return parts[0], parts[1], None, None
++        text = text.strip()  # plain MAJOR.MINOR.PATCH: fall through to full parse
++    try:
++        full = Version.parse(text)
++    except ValueError:
++        raise ValueError(f"invalid range component: {text!r}") from None
++    return full.major, full.minor, full.patch, full
++
++
++def _lower(M, m, p, full):
++    """Comparators for '>= partial' (missing positions are zero)."""
++    if M is None:
++        return []
++    if full is not None:
++        return [(">=", full)]
++    return [(">=", _v(M, m or 0, p or 0))]
++
++
++def _next_up(M, m, p):
++    """Exclusive upper bound for a partial: the 'next' version above it."""
++    if M is None:
++        return []
++    if m is None:
++        return [("<", _v(M + 1))]
++    if p is None:
++        return [("<", _v(M, m + 1))]
++    return None  # full version
++
++
++def _desugar(op, text):
++    M, m, p, full = _parse_partial(text)
++    if op in ("", "="):
++        if M is None:
++            return []
++        if full is not None:
++            return [("=", full)]
++        return _lower(M, m, p, full) + _next_up(M, m, p)
++    if op == ">":
++        if M is None:
++            return [_NOTHING]
++        if full is not None:
++            return [(">", full)]
++        return [(">=", _v(M + 1))] if m is None else [(">=", _v(M, m + 1))]
++    if op == ">=":
++        return _lower(M, m, p, full)
++    if op == "<":
++        if M is None:
++            return [_NOTHING]
++        return [("<", full if full is not None else _v(M, m or 0, p or 0))]
++    if op == "<=":
++        if M is None:
++            return []
++        if full is not None:
++            return [("<=", full)]
++        return _next_up(M, m, p)
++    if op == "~":
++        if M is None:
++            return []
++        if m is None:
++            return _lower(M, m, p, full) + [("<", _v(M + 1))]
++        return _lower(M, m, p, full) + [("<", _v(M, m + 1))]
++    if op == "^":
++        if M is None:
++            return []
++        if M > 0 or m is None:
++            upper = _v(M + 1)
++        elif m > 0 or p is None:
++            upper = _v(0, m + 1)
++        else:
++            upper = _v(0, 0, p + 1)
++        return _lower(M, m, p, full) + [("<", upper)]
++    raise ValueError(f"invalid operator: {op!r}")
++
++
++def _hyphen(a, b):
++    M, m, p, full = _parse_partial(a)
++    low = _lower(M, m, p, full)
++    M, m, p, full = _parse_partial(b)
++    if full is not None:
++        return low + [("<=", full)]
++    return low + _next_up(M, m, p)
++
++
++def _parse_set(text):
++    text = text.strip()
++    text = re.sub(r"(<=|>=|<|>|=|~|\^)\s+", r"\1", text)
++    tokens = text.split()
++    comparators = []
++    i = 0
++    while i < len(tokens):
++        tok = tokens[i]
++        if i + 1 < len(tokens) and tokens[i + 1] == "-":
++            if i + 2 >= len(tokens) or tok == "-":
++                raise ValueError(f"invalid hyphen range: {text!r}")
++            comparators += _hyphen(tok, tokens[i + 2])
++            i += 3
++            continue
++        if tok == "-":
++            raise ValueError(f"invalid hyphen range: {text!r}")
++        op = ""
++        for candidate in _OPS:
++            if tok.startswith(candidate):
++                op = candidate
++                break
++        comparators += _desugar(op, tok[len(op):])
++        i += 1
++    return comparators
++
++
++def _parse_range(range_):
++    if not isinstance(range_, str):
++        raise ValueError(f"invalid range: {range_!r}")
++    return [_parse_set(part) for part in range_.split("||")]
++
++
++def _parse_version(version):
++    if isinstance(version, Version):
++        return version
++    if not isinstance(version, str):
++        raise ValueError(f"invalid version: {version!r}")
++    return Version.parse(version)
++
++
++def _test(op, a, b):
++    if op == "<":
++        return a < b
++    if op == "<=":
++        return a <= b
++    if op == ">":
++        return a > b
++    if op == ">=":
++        return a >= b
++    return a == b
++
++
++def _matches(ver, sets):
++    for comparators in sets:
++        if not all(_test(op, ver, other) for op, other in comparators):
++            continue
++        if ver.prerelease and not any(
++            other.prerelease and other.release == ver.release for _, other in comparators
++        ):
++            continue
++        return True
++    return False
++
+ 
+ def satisfies(version, range_):
+-    raise NotImplementedError
++    sets = _parse_range(range_)
++    return _matches(_parse_version(version), sets)
+ 
+ 
+ def max_satisfying(versions, range_):
+-    raise NotImplementedError
++    sets = _parse_range(range_)
++    best = None
++    best_ver = None
++    for item in versions:
++        ver = _parse_version(item)
++        if _matches(ver, sets) and (best_ver is None or ver > best_ver):
++            best, best_ver = item, ver
++    return best
+diff --git a/tests/test_ranges_spec.py b/tests/test_ranges_spec.py
+new file mode 100644
+index 0000000..deb5a26
+--- /dev/null
++++ b/tests/test_ranges_spec.py
+@@ -0,0 +1,48 @@
++import unittest
++
++from depres import max_satisfying, satisfies
++
++
++class SpecTest(unittest.TestCase):
++    def cases(self, rows):
++        for version, rng, expected in rows:
++            with self.subTest(version=version, rng=rng):
++                self.assertIs(satisfies(version, rng), expected)
++
++    def test_table(self):
++        self.cases([
++            ("1.9.9", ">1", False), ("2.0.0", ">1", True),
++            ("1.2.9", ">1.2", False), ("1.3.0", ">1.2", True),
++            ("1.2.0", ">=1.2", True), ("1.1.9", "<1.2", True), ("1.2.0", "<1.2", False),
++            ("1.9.9", "<=1", True), ("2.0.0", "<=1", False),
++            ("1.2.9", "<=1.2", True), ("1.3.0", "<=1.2", False),
++            ("1.2.5", "=1.2", True), ("1.3.0", "1.2", False),
++            ("5.0.0", "*", True), ("5.0.0", "", True), ("1.0.0-a", "*", False),
++            ("1.0.0-a", "", False),
++            ("2.3.9", "1.2.3 - 2.3", True), ("2.4.0", "1.2.3 - 2.3", False),
++            ("2.9.9", "1.2.3 - 2", True), ("3.0.0", "1.2.3 - 2", False),
++            ("1.2.3", ">= 1.2.3", True),
++            ("1.2.9", "~1.2", True), ("1.3.0", "~1.2", False), ("1.9.0", "~1", True),
++            ("1.2.3-beta.3", "~1.2.3-beta.2", True), ("1.2.4-beta.3", "~1.2.3-beta.2", False),
++            ("0.0.3", "^0.0.3", True), ("0.0.4", "^0.0.3", False),
++            ("1.9.0", "^1.2.x", True), ("0.0.9", "^0.0", True), ("0.1.0", "^0.0", False),
++            ("0.9.0", "^0", True), ("1.0.0", "^0", False), ("1.9.0", "^1.x", True),
++            ("0.2.9", "^0.2", True), ("0.3.0", "^0.2", False),
++            ("1.2.4-alpha.1", ">=1.2.3-alpha.1 <1.3.0", False),
++            ("1.2.3-alpha.7", ">=1.2.3-alpha.1 <1.3.0", True),
++            ("1.5.0-beta", "^1.0.0", False), ("2.0.0-rc.1", "^1.0.0", False),
++            ("1.2.3+build.5", "1.2.3", True), ("v1.2.3", "=v1.2.3", True),
++            ("1.0.0", ">*", False),
++        ])
++
++    def test_invalid(self):
++        for rng in ["1.x.3", ">=", "1.2.3 -", "foo", "^", "- 1"]:
++            with self.subTest(rng=rng), self.assertRaises(ValueError):
++                satisfies("1.0.0", rng)
++        with self.assertRaises(ValueError):
++            satisfies("nope", "*")
++        with self.assertRaises(ValueError):
++            max_satisfying(["1.0.0", "bad"], "*")
++
++    def test_max_returns_original(self):
++        self.assertEqual(max_satisfying(["v1.0.0", "1.1.0+b"], "1"), "1.1.0+b")

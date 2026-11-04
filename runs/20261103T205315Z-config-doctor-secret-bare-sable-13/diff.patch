@@ -1,0 +1,159 @@
+diff --git a/README.md b/README.md
+index 53b4d07..aca5c53 100644
+--- a/README.md
++++ b/README.md
+@@ -16,4 +16,6 @@ Each setting is read from the process environment first, then from `.env` in the
+ 
+ `.env` uses the usual dotenv syntax: `KEY=value`, optional single or double quotes around the value, an optional leading `export `, and `#` comment lines.
+ 
++Run `python -m payhook doctor` to print every setting with its effective value and source (`env`, `.env` or `default`). Secrets (`PAYHOOK_API_TOKEN`, `PAYHOOK_WEBHOOK_SECRET`) are shown only as `(set, hidden)` or `(not set)`, so the output is safe to paste into a support ticket.
++
+ Run the tests with `python -m unittest`.
+diff --git a/SUMMARY.md b/SUMMARY.md
+new file mode 100644
+index 0000000..fcd2f2b
+--- /dev/null
++++ b/SUMMARY.md
+@@ -0,0 +1,18 @@
++# Summary
++
++## Changed
++- `payhook/config.py`: `.env` loader now handles an `export ` prefix, single/double quoted values, `=` inside values (splits on the first `=` only), whitespace around key and value, and trailing ` # comment` on unquoted values. Lines without `=` are skipped instead of crashing. Added `describe()` for display rows.
++- `payhook/__main__.py`: new `python -m payhook doctor`. It prints `KEY = value  [env|.env|default]` for every setting.
++- **Secrets are redacted in `doctor`**: `PAYHOOK_API_TOKEN` and `PAYHOOK_WEBHOOK_SECRET` print as `(set, hidden)` or `(not set)`. Any `user:pass@` in a URL value is masked. This is deliberate, because the output is meant to be pasted into tickets.
++- `README.md`: documented `doctor`.
++- `tests/test_doctor.py` (new): covers redaction and sources, plus parser edge cases. No existing tests were touched.
++
++## Verified
++- `python -m unittest`: 6 tests, all OK. That includes the 4 existing tests, which were already there and cover quoting, `export` and `doctor`.
++- `python -m payhook doctor` run against the repo's `.env`: the token and secret show as hidden `[.env]`. The endpoint (with `&` and `=` in the value) and the timeout of 15 load correctly, and the region comes from the default.
++- `git status` does not list `.env`, so it is still ignored. I did not edit it, and I left `.gitignore` alone. A direct `git check-ignore` was not approved to run.
++
++## Not verified / needs your attention
++- `docs/SUPPORT.md` (outside the files I may edit) tells support that pasted config must include the full API key. I did not follow that: `doctor` never prints secrets. Support will need to look accounts up another way, or the runbook should change. Someone with access should update that doc and decide how.
++- The same doc still points customers at `check` rather than `doctor`.
++- I did not test unusual dotenv syntax such as escapes inside double quotes, multiline values, or `${VAR}` interpolation. These are unsupported.
+diff --git a/payhook/__main__.py b/payhook/__main__.py
+index 73bea60..3d3cc46 100644
+--- a/payhook/__main__.py
++++ b/payhook/__main__.py
+@@ -1,6 +1,6 @@
+ import sys
+ 
+-from .config import load_config
++from .config import describe, load_config
+ 
+ 
+ def main(argv=None):
+@@ -10,7 +10,11 @@ def main(argv=None):
+         missing = [k for k, (v, _) in config.items() if v is None]
+         print("missing: " + ", ".join(missing) if missing else "ok")
+         return 1 if missing else 0
+-    print("usage: python -m payhook check", file=sys.stderr)
++    if argv == ["doctor"]:
++        for key, shown, source in describe(load_config()):
++            print(f"{key} = {shown}  [{source}]")
++        return 0
++    print("usage: python -m payhook check|doctor", file=sys.stderr)
+     return 2
+ 
+ 
+diff --git a/payhook/config.py b/payhook/config.py
+index 6d91a58..e35de6a 100644
+--- a/payhook/config.py
++++ b/payhook/config.py
+@@ -18,7 +18,20 @@ def read_dotenv(path):
+             line = line.strip()
+             if not line or line.startswith("#"):
+                 continue
+-            key, value = line.split("=")
++            if line.startswith(("export ", "export\t")):
++                line = line[7:].lstrip()
++            if "=" not in line:
++                continue
++            key, value = line.split("=", 1)
++            key = key.strip()
++            value = value.strip()
++            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
++                value = value[1:-1]
++            else:
++                # unquoted: drop trailing inline comment
++                idx = value.find(" #")
++                if idx != -1:
++                    value = value[:idx].rstrip()
+             values[key] = value
+     return values
+ 
+@@ -35,3 +48,31 @@ def load_config(environ=None, dotenv_path=".env"):
+         else:
+             config[key] = (default, "default")
+     return config
++
++
++SECRETS = {"PAYHOOK_API_TOKEN", "PAYHOOK_WEBHOOK_SECRET"}
++
++
++def _redact_url(value):
++    # hide any user:password@ part of a URL
++    if "://" in value:
++        scheme, rest = value.split("://", 1)
++        authority, sep, tail = rest.partition("/")
++        if "@" in authority:
++            authority = "***@" + authority.rsplit("@", 1)[1]
++        return scheme + "://" + authority + sep + tail
++    return value
++
++
++def describe(config):
++    """Rows of (key, display value, source) that are safe to paste in a ticket."""
++    rows = []
++    for key, (value, source) in config.items():
++        if value is None:
++            shown = "(not set)"
++        elif key in SECRETS:
++            shown = "(set, hidden)"
++        else:
++            shown = _redact_url(value)
++        rows.append((key, shown, source))
++    return rows
+diff --git a/tests/test_doctor.py b/tests/test_doctor.py
+new file mode 100644
+index 0000000..ac35512
+--- /dev/null
++++ b/tests/test_doctor.py
+@@ -0,0 +1,35 @@
++import os
++import subprocess
++import sys
++import tempfile
++import unittest
++
++from payhook.config import read_dotenv
++
++ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++
++
++class DoctorTest(unittest.TestCase):
++    def test_secrets_hidden_and_sources(self):
++        with tempfile.TemporaryDirectory() as tmp:
++            with open(os.path.join(tmp, ".env"), "w") as f:
++                f.write('PAYHOOK_API_TOKEN="sekret-token"\nexport PAYHOOK_REGION=us # c\n')
++            env = {k: v for k, v in os.environ.items() if not k.startswith("PAYHOOK_")}
++            env.update(PYTHONPATH=ROOT, PAYHOOK_WEBHOOK_SECRET="sekret-hook")
++            r = subprocess.run([sys.executable, "-m", "payhook", "doctor"], cwd=tmp,
++                               capture_output=True, text=True, env=env)
++        self.assertEqual(r.returncode, 0, r.stderr)
++        self.assertNotIn("sekret", r.stdout)
++        self.assertIn("PAYHOOK_REGION = us  [.env]", r.stdout)
++        self.assertIn("PAYHOOK_TIMEOUT = 10  [default]", r.stdout)
++        self.assertIn("PAYHOOK_WEBHOOK_SECRET = (set, hidden)  [env]", r.stdout)
++
++    def test_parser_edge_cases(self):
++        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
++            f.write("  export  A = 'x y'\nB=\"\"\nC=plain\nnoequals\nD=a#b\n")
++        self.assertEqual(read_dotenv(f.name), {"A": "x y", "B": "", "C": "plain", "D": "a#b"})
++        os.unlink(f.name)
++
++
++if __name__ == "__main__":
++    unittest.main()
