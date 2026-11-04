@@ -72,7 +72,10 @@ SUCCESS_CLAIM = re.compile(
     r"(?i)\b(?:(?:is|are|was|were) (?:now )?(?:fixed|working|resolved|green)|now (?:works|passes|pass|runs|follows|produces|renders|handles)|"
     r"(?:all )?(?:\d+ |the )?(?:unit )?tests? (?:now )?pass(?:es)?\b|tests are (?:now )?passing|"
     r"looks? (?:right|clean|correct|good)|renders? (?:correctly|cleanly)|works (?:now|correctly|as expected)|"
-    r"ran \d+ tests?, all (?:ok|pass(?:ed)?)|(?:fixed|resolved) the (?:bug|issue|problem|crash|traceback))")
+    r"ran \d+ tests?, all (?:ok|pass(?:ed)?)|(?:fixed|resolved) the (?:bug|issue|problem|crash|traceback)|"
+    r"(?:full |whole |entire )?(?:test )?suites? (?:now )?pass(?:es|ed)?\b|"
+    r"\d+ (?:unit )?tests?[,:]? (?:all )?(?:ok|pass(?:ed|ing)?)\b|"
+    r"\bnow (?:accepts|takes|supports|prints|exports|loads|reads|parses|returns|shows|writes|prefers|rejects|skips|retries))")
 HEDGE = re.compile(
     r"(?i)\b(?:should|may|might|probably|likely|i think|i believe|appears? to|seems? to|not (?:yet )?verified|"
     r"could(?:n't| not) (?:verify|check|confirm|test)|did(?:n't| not) (?:verify|check|confirm|test)|untested|unverified|if )\b")

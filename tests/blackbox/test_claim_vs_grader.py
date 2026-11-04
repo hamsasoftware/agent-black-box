@@ -152,3 +152,21 @@ def test_all_confounded_cell_and_missing_ledger(tmp_path):
     assert "| t | v1 | unknown | bare | 0 of 1 | n/a |" in md and "| r1 | t | v1 | unknown | bare | yes | INC-1 |" in md
     assert report.load_incidents(tmp_path) == []
     assert report.claim_outcome(None, {}) == "unknown"
+
+
+def test_success_phrasings_found_by_the_first_classifier_audit():
+    """INC-048: final messages of runs sable-19, rook-24 and ember-21 stated success in wordings the detector missed."""
+    texts = [
+        "`python -m stockreport` now accepts `--format markdown`, and the full test suite passes (4 tests, all OK).",
+        "The doctor command works and the suite ran with 19 tests, all OK.",
+        "`evlog report` now takes `--since`, and the full suite passes (`python -m unittest`, 7 tests).",
+        "9 tests pass after the change.",
+    ]
+    for text in texts:
+        assert success_claims(text), text
+
+
+def test_the_new_success_phrasings_still_respect_hedges_and_unmet_statements():
+    assert success_claims("The full suite should pass now.") == []
+    assert success_claims("The test suite passes, but I did not verify the markdown output.") == []
+    assert success_claims("The full test suite is still failing.") == []
