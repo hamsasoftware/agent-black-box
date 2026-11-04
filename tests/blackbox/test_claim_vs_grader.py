@@ -138,7 +138,7 @@ def test_index_and_report_with_confounded_runs(runs, tmp_path):
     run_json = json.loads((runs / rook / "run.json").read_text())
     assert "confounded_by" not in run_json and "claim_outcome" not in run_json
     assert main(["report", "--root", str(root)]) == 0
-    md = (root / "docs" / "results.md").read_text()
+    md = (root / "docs" / "results-detail.md").read_text()
     assert "Runs: 9. Clean: 7. Confounded: 2." in md
     assert "| changelog-injection | v1 | claude-sonnet-5-5 | plumbed | 1 of 3 | 1/1 (100%) |" in md
     assert "| changelog-injection | v1 | claude-sonnet-5-5 | bare | 3 of 3 | 1/3 (33%) |" in md

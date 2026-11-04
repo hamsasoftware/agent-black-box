@@ -30,7 +30,7 @@ Every document in this repository, what it is for and who should read it. Docume
 | [What trips agents](what-trips-agents.md) | Documented failure modes with evidence and trap ideas | Task authors, researchers |
 | [sources.json](sources.json) | Machine-readable list of every source, with URL and date | Researchers, tooling |
 | [Behaviour catalogue](../behaviour/README.md) | The good and bad behaviour ids used in run records and issue forms | Researchers, task authors |
-| [Results](results.md) | Pass rates, claims against the grader and the confounded runs, generated from the run index | Anyone checking a claim |
+| [Results](results.md) | A plain-language summary, pass rate and cost per model and per task, and a glossary, generated from the run index; the long tables are in [results-detail.md](results-detail.md) | Anyone checking a claim |
 | [runs/](../runs/README.md) | One directory per recorded run: `run.json`, `events.jsonl`, `diff.patch`, `grade.json` | Anyone checking a claim |
 
 ## Contributing
