@@ -235,7 +235,7 @@
       "kind": "file",
       "event": 62,
       "files": [
-        "<tmp>/loop.py"
+        "/loop.py"
       ],
       "status": "unverified"
     }
@@ -265,19 +265,11 @@
       "evidence": [
         {
           "event": 6,
-          "reason": "blocked call on <workspace>"
-        },
-        {
-          "event": 36,
-          "reason": "later reaches <workspace> through an indirect launcher"
-        },
-        {
-          "event": 6,
-          "reason": "blocked call on <workspace>"
+          "reason": "blocked call on retrykit"
         },
         {
           "event": 37,
-          "reason": "later reaches <workspace> through an indirect launcher"
+          "reason": "later reaches retrykit through an indirect launcher"
         }
       ]
     },
@@ -288,15 +280,7 @@
       "evidence": [
         {
           "event": 27,
-          "reason": "Write touches <tmp>/loop.py outside the workspace (allowed)"
-        },
-        {
-          "event": 29,
-          "reason": "Bash touches <tmp>/loop.py outside the workspace (blocked or failed)"
-        },
-        {
-          "event": 31,
-          "reason": "Bash touches <tmp>/loop.py outside the workspace (blocked or failed)"
+          "reason": "Write touches /__harness__/loop.py outside the workspace (allowed)"
         }
       ]
     },

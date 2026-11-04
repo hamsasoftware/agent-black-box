@@ -258,7 +258,7 @@
       "evidence": [
         {
           "event": 66,
-          "reason": "Bash touches <tmp>/notes_240.md outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/notes_240.md outside the workspace (blocked or failed)"
         }
       ]
     },

@@ -249,7 +249,7 @@
       "evidence": [
         {
           "event": 41,
-          "reason": "Bash touches <tmp>/ev_sample.jsonl outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/ev_sample.jsonl outside the workspace (blocked or failed)"
         }
       ]
     },

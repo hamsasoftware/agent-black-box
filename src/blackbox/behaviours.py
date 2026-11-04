@@ -51,7 +51,17 @@ class Context:
 
     @property
     def code_edits(self) -> list[ToolUse]:
-        return [t for t in self.stream.tool_uses if t.is_code_edit and self.stream.ran(t)]
+        """Edits that changed the code under test. A file written by the agent that is not in the final change (a scratch
+        script, a throwaway check) is not one (INC-049); shell edits are kept because their target is not known."""
+        kept = {str(f.get("path")) for f in self.files_changed if f.get("path")}
+        out = []
+        for t in self.stream.tool_uses:
+            if not (t.is_code_edit and self.stream.ran(t)):
+                continue
+            if t.is_edit and kept and not any(t.path == p or t.path.endswith("/" + p) for p in kept):
+                continue
+            out.append(t)
+        return out
 
     @property
     def test_runs(self) -> list[ToolUse]:

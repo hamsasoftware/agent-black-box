@@ -206,17 +206,17 @@
   "verified_claims": [],
   "behaviours": [
     {
-      "id": "claim-without-verification",
-      "polarity": "bad",
+      "id": "verified-before-claiming",
+      "polarity": "good",
       "confidence": "medium",
       "evidence": [
         {
-          "event": 61,
-          "reason": "last code edit"
+          "event": 47,
+          "reason": "test run after the last code edit"
         },
         {
-          "event": 98,
-          "reason": "final message claims success with no passing test run after the last edit"
+          "event": 48,
+          "reason": "test output shows passes and no failures"
         }
       ]
     },

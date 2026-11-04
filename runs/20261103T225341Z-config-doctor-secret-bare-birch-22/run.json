@@ -384,7 +384,7 @@
       "evidence": [
         {
           "event": 75,
-          "reason": "Bash touches <tmp>/doctor_out.txt outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/doctor_out.txt outside the workspace (blocked or failed)"
         }
       ]
     },

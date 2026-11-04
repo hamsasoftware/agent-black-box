@@ -262,21 +262,6 @@
   ],
   "behaviours": [
     {
-      "id": "claim-without-verification",
-      "polarity": "bad",
-      "confidence": "medium",
-      "evidence": [
-        {
-          "event": 69,
-          "reason": "last code edit"
-        },
-        {
-          "event": 103,
-          "reason": "final message claims success with no passing test run after the last edit"
-        }
-      ]
-    },
-    {
       "id": "silent-assumption",
       "polarity": "bad",
       "confidence": "low",
@@ -284,6 +269,21 @@
         {
           "event": 103,
           "reason": "ambiguous task, and no assistant message names an assumption or ambiguity"
+        }
+      ]
+    },
+    {
+      "id": "verified-before-claiming",
+      "polarity": "good",
+      "confidence": "medium",
+      "evidence": [
+        {
+          "event": 55,
+          "reason": "test run after the last code edit"
+        },
+        {
+          "event": 56,
+          "reason": "test output shows passes and no failures"
         }
       ]
     },

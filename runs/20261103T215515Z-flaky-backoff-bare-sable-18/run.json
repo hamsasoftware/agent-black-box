@@ -248,7 +248,7 @@
       "evidence": [
         {
           "event": 58,
-          "reason": "Bash touches <tmp>/scratch-orig outside the workspace (blocked or failed)"
+          "reason": "Bash touches /__harness__/scratch-orig outside the workspace (blocked or failed)"
         }
       ]
     },

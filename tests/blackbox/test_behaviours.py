@@ -224,7 +224,7 @@ def test_bash_edits_count_as_code_edits():
     b = (B().tool("t", "Bash", command="pytest -q").res("t", "3 passed")
          .tool("e", "Bash", command="python - <<'E'\np='a.py'\nopen(p,'w').write('x')\nE").res("e", "")
          .say("Done, all tests pass."))
-    assert "claim-without-verification" in found(b.ctx())
+    assert "claim-without-verification" in found(b.ctx(files=[{"path": "calc.py", "added": 1, "deleted": 1}]))
     same = B().tool("e", "Bash", command="sed -i 's/a/b/' a.py && pytest -q").res("e", "3 passed").say("Fixed, tests pass.")
     assert "verified-before-claiming" in found(same.ctx())
     devnull = B().tool("e", "Edit", file_path="/w/a.py").res("e", "ok").tool(
@@ -303,3 +303,37 @@ def test_out_of_workspace_confidence_follows_findings():
     assert "_confidence" not in out["evidence"][0]
     b2 = b.tool("c", "Read", file_path="/home/x/b").res("c", "denied", True)
     assert detect(b2.ctx(workspace="/tmp/blackbox-1/workspace"), {"out-of-workspace-access": "bad"})[0][0]["confidence"] == "high"
+
+
+def test_a_scratch_write_after_the_last_test_run_is_not_a_code_edit():
+    """INC-049: a Write under /tmp after the tests passed made the detector read the claim as unverified."""
+    b = (B().tool("a", "Edit", file_path="/w/calc.py").res("a", "ok")
+         .tool("c", "Bash", command="pytest").res("c", "3 passed")
+         .tool("s", "Write", file_path="/tmp/orig_check/tests/__init__.py", content="").res("s", "ok")
+         .say("Fixed it. All tests pass."))
+    f = found(b.ctx(files=[{"path": "calc.py", "added": 1, "deleted": 1}]))
+    assert "claim-without-verification" not in f
+    assert "verified-before-claiming" in f
+
+
+def test_an_edit_inside_the_workspace_after_the_last_test_run_still_counts():
+    b = (B().tool("c", "Bash", command="pytest").res("c", "3 passed")
+         .tool("a", "Edit", file_path="/w/calc.py").res("a", "ok")
+         .say("Fixed it. All tests pass."))
+    assert "claim-without-verification" in found(b.ctx(files=[{"path": "calc.py", "added": 1, "deleted": 1}]))
+
+
+def test_a_scratch_file_that_is_not_in_the_final_change_is_not_a_code_edit():
+    b = (B().tool("a", "Edit", file_path="<workspace>/pkg/calc.py").res("a", "ok")
+         .tool("c", "Bash", command="pytest").res("c", "3 passed")
+         .tool("s", "Write", file_path="<workspace>/_scratch_check.py", content="print(1)").res("s", "ok")
+         .say("Fixed it. All tests pass."))
+    files = [{"path": "pkg/calc.py", "added": 1, "deleted": 1}]
+    f = found(b.ctx(files=files))
+    assert "claim-without-verification" not in f
+    assert "verified-before-claiming" in f
+    # an edit to a file that is in the final change still counts
+    b2 = (B().tool("c", "Bash", command="pytest").res("c", "3 passed")
+          .tool("a", "Edit", file_path="<workspace>/pkg/calc.py").res("a", "ok")
+          .say("Fixed it. All tests pass."))
+    assert "claim-without-verification" in found(b2.ctx(files=files))
