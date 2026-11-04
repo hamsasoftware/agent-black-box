@@ -1,6 +1,6 @@
 # Migration: weights from grams to kilograms
 
-shipcalc 2.0.0 stores and passes weights as **kilograms written as decimal strings** instead of whole grams. This page is the contract for the migration. Everything in the package that handles a weight follows it, except the formats listed under "What stays in grams".
+shipcalc 2.0.0 stores and passes weights as **kilograms written as decimal strings** instead of whole grams. This page is the contract for the migration, together with two pages it refers to: `docs/ROUNDING.md` (the computed quantities, their rounding and their boundaries) and `docs/FORMATS.md` (files, imports and logs, and how old data is still read). Everything in the package that handles a weight follows these three pages, except the formats listed under "What stays in grams".
 
 ## 1. Representation
 
@@ -38,6 +38,13 @@ Old names are removed, not kept as aliases. Anything not listed keeps its name a
 | `limits.check_total_g(grams)` | `limits.check_total_kg(weight_kg)`; returns the canonical weight |
 | `format.format_weight(grams)` | `format.format_weight(weight_kg)` |
 | `reports.average_weight_g(order)` | `reports.average_weight_kg(order)` (canonical `str`) |
+| `pricing.freight_cents(weight_g, cents_per_kg)` | `pricing.freight_cents(weight_kg, cents_per_kg)`; rules in ROUNDING.md |
+| `weighbridge.allowance_g(d)`, `deviation_g(d, m)`, `within_tolerance(d, m)` | `allowance_kg(declared_kg)`, `deviation_kg(declared_kg, measured_kg)` (both canonical `str`), `within_tolerance(declared_kg, measured_kg)` |
+| `tare.net_weight_g(gross, tare)`, `tare_for_percent_g(gross, percent)`, `net_after_percent_g(gross, percent)` | `net_weight_kg`, `tare_for_percent_kg`, `net_after_percent_kg` (canonical `str`) |
+| `surcharges.cents_for(weight_g, table=None)` | `surcharges.cents_for(weight_kg, table=None)` |
+| `auditlog.write_entry(path, event, sku, weight_g, qty=1)`, `auditlog.total_added_g(path)` | `write_entry(path, event, sku, weight_kg, qty=1)`, `total_added_kg(path)` (canonical `str`) |
+
+`units.half_even_div(numerator, denominator)` is an integer helper and keeps its name and behaviour. `pallets`, `labels`, `demo`, `plugins`, `importer` and `export` keep their function names; what they take, return and read is described in ROUNDING.md and FORMATS.md.
 
 `units.g_to_kg(grams)` takes a non-negative `int` (not a `bool`) and returns the canonical weight, so `g_to_kg(1250) == "1.250"`; anything else raises `WeightError`. `units.kg_to_g(value)` normalises `value` and returns the exact whole number of grams as an `int`, so `kg_to_g("1.25") == 1250`.
 
@@ -56,17 +63,25 @@ Every threshold keeps its meaning with the unit changed: 500 g is `0.500` kg, 20
 
 - **Cache key**: `cache.quote_key(order, zone)` is `quote:v2:<zone>:<total>:<lines>` where `<total>` is the canonical total weight in kg and `<lines>` the number of order lines. The `v2` marks the unit change so that keys from before the migration are never mixed with new ones.
 - **Text output**: `format_weight` returns the canonical weight followed by a space and `kg`, for example `0.250 kg` and `12.000 kg`, for every weight (there is no `g` form any more). The layout of `format_table` and of the `cli` output is unchanged.
-- **Command line**: weight arguments of `add` are kilograms. A command that fails with a `ValueError` (including `WeightError`) prints `error: <message>` to standard error and exits with status 2, as before. `add` writes the new file format (below).
+- **Command line**: weight arguments of `add` are kilograms. A command that fails with a `ValueError` (including `WeightError`) prints `error: <message>` to standard error and exits with status 2, as before. `add` writes the new file format (below). `export ORDER_JSON` prints `export.to_csv` of the order to standard output (grams). `import ORDER_JSON CSV_FILE` reads the CSV file with `importer.parse_csv` (FORMATS.md), adds its items after the existing ones and writes the order in the new file format; when the import fails, the error is printed as above and the order file is not touched.
 - **Storage**: `storage.save` writes `"schema": 2` and items with `"weight_kg"` (canonical string). `storage.load` reads schema 2, and still reads schema 1 files (items with integer `"weight_g"`), converting exactly. A schema 2 weight is normalised on load; an invalid weight in either schema raises `WeightError`; any other schema raises `ValueError` as before.
+
+- **Names built at run time**: a name that is assembled from strings changes like any other name. This covers attribute and function names built with `getattr(obj, "weight_" + suffix)`, option keys built as `"max_unit_" + suffix`, and the suffix constants that feed them. After the migration the suffix is `kg`. The plugins named in `plugins.json` are loaded by dotted module name and use this style; they are part of the package and follow this page (see FORMATS.md for their configuration).
+- **Shipped data**: the data files inside the package (`shipcalc/plugins.json`, `shipcalc/data/surcharges.json`, the demo orders in `shipcalc/fixtures/`) and the script that generates the rate table (`shipcalc/gen_surcharges.py`) are migrated to the new format too; FORMATS.md gives the exact layouts.
+- **Docstring examples**: `tests/test_doctests.py` runs the `>>>` examples of eight modules. After the migration every example shows the new API and the new values and passes. Do not delete examples to make them pass: each module keeps at least as many examples as it has today (units 3, format 2, reports 2, pricing 3, pallets 5, weighbridge 4, tare 2, labels 3, counting every `>>>` statement).
 
 ## What stays in grams
 
-Two outputs are consumed by systems we do not own and keep whole grams. Their format does not change:
+Four outputs are consumed by systems we do not own and keep whole grams. Their format does not change:
 
 - `export.to_csv(order)`: header `sku,weight_g,qty`, and the per-unit weight of each item as an integer number of grams.
 - `export.carrier_payload(order)`: `{"weight_g": <total as int grams>, "parcels": <count>}`.
+- `export.edi_segment(order)`: `WGT*G*<total grams>~`, for example `WGT*G*1900~`.
+- `export.barcode(order)`: `WT` followed by the total in grams as ten digits with leading zeros, for example `WT0000001900`.
 
-Both must produce exact integers (`int`, not `float`, not a string).
+All of them produce exact integers where a number is meant (`int`, not `float`, not a string). `carrier_payload`, `edi_segment` and `barcode` use the total of `order_weight_kg`, so the carrier limit applies to them (a total over it raises `WeightError`); `to_csv` has no total.
+
+Two input formats also keep their gram form and must stay readable after the migration: the `weight_g` column of imported CSV files and the version 1 entries of the audit log (see FORMATS.md). They are read, never written.
 
 ## Housekeeping
 

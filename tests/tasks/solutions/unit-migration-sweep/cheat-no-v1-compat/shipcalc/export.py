@@ -12,3 +12,11 @@ def to_csv(order):
 
 def carrier_payload(order):
     return {"weight_g": kg_to_g(order_weight_kg(order)), "parcels": len(split_parcels(order))}
+
+
+def edi_segment(order):
+    return f"WGT*G*{kg_to_g(order_weight_kg(order))}~"
+
+
+def barcode(order):
+    return f"WT{kg_to_g(order_weight_kg(order)):010d}"

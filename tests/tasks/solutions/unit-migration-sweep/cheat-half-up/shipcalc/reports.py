@@ -7,6 +7,12 @@ MEDIUM_KG = Decimal("2")
 
 
 def average_weight_kg(order):
+    """Average weight of one unit in the order.
+
+    >>> from shipcalc.models import Item, Order
+    >>> average_weight_kg(Order([Item("A", "1.000"), Item("B", "2.000", 2)]))
+    '1.667'
+    """
     units = sum(item.qty for item in order.items)
     if units == 0:
         return "0.000"

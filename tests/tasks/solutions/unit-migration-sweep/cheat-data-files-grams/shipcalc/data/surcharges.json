@@ -1,0 +1,18 @@
+{
+  "bands": [
+    {
+      "cents": 0,
+      "max_g": 1000
+    },
+    {
+      "cents": 150,
+      "max_g": 5000
+    },
+    {
+      "cents": 400,
+      "max_g": 15000
+    }
+  ],
+  "over_cents": 900,
+  "schema": 1
+}

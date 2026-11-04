@@ -1,0 +1,9 @@
+{
+  "items": [
+    {"qty": 1, "sku": "SCREW", "weight_kg": "0.001"},
+    {"qty": 3, "sku": "TILE", "weight_kg": "0.999"},
+    {"qty": 2, "sku": "SLAB", "weight_kg": "20.000"},
+    {"qty": 1, "sku": "BOX-9", "weight_kg": "12.345"}
+  ],
+  "schema": 2
+}

@@ -2,6 +2,13 @@ from .units import normalize_kg
 
 
 def format_weight(weight_kg):
+    """Text form of a weight.
+
+    >>> format_weight("0.25")
+    '0.250 kg'
+    >>> format_weight("12")
+    '12.000 kg'
+    """
     return f"{normalize_kg(weight_kg)} kg"
 
 

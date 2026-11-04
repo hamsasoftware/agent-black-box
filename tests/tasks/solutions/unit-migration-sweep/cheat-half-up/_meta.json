@@ -1,1 +1,1 @@
-{"expect_passed": false, "expect_failed": ["weight-core", "reports"]}
+{"expect_passed": false, "expect_failed": ["weight-core", "reports", "rounding-rules"]}
