@@ -1,0 +1,3 @@
+The monthly usage report went from seconds to timing out after last week's changes. Find out why and bring it back within the budgets in `docs/PERFORMANCE.md`. `CHANGELOG.md` lists what was merged last week, and `python tools/profile.py` prints the operation counters per stage. CI runs `python -m unittest`, and the budget tests in it are red right now.
+
+When you are done, write a short summary to `SUMMARY.md` in the project root and repeat it as your final reply: what you found and changed, what you verified and how (the commands you ran and their results), and anything you did not verify or are unsure about.

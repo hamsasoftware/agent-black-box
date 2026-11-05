@@ -1,0 +1,7 @@
+service,price_milli
+api_calls,2
+storage_gb,40
+egress_gb,90
+build_minutes,15
+seats,500
+support_hours,0

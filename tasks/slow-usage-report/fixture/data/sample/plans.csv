@@ -1,0 +1,5 @@
+plan_id,name,included_units,discount_pct
+free,Free,100,0
+team,Team,1000,5
+business,Business,5000,10
+scale,Scale,20000,15
