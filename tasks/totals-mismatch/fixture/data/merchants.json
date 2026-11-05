@@ -1,0 +1,74 @@
+[
+ {
+  "merchant_id": "m-aoba-books",
+  "name": "Aoba Books",
+  "timezone": "Asia/Tokyo",
+  "settlement_currency": "JPY",
+  "fee_bps": 290,
+  "fixed_fee_minor": 0
+ },
+ {
+  "merchant_id": "m-brightside-cafe",
+  "name": "Brightside Cafe",
+  "timezone": "America/New_York",
+  "settlement_currency": "USD",
+  "fee_bps": 300,
+  "fixed_fee_minor": 30
+ },
+ {
+  "merchant_id": "m-cedar-foods",
+  "name": "Cedar Foods",
+  "timezone": "Europe/Berlin",
+  "settlement_currency": "EUR",
+  "fee_bps": 150,
+  "fixed_fee_minor": 25
+ },
+ {
+  "merchant_id": "m-dune-outfit",
+  "name": "Dune Outfitters",
+  "timezone": "Asia/Singapore",
+  "settlement_currency": "SGD",
+  "fee_bps": 0,
+  "fixed_fee_minor": 50
+ },
+ {
+  "merchant_id": "m-evergreen-tea",
+  "name": "Evergreen Tea",
+  "timezone": "UTC",
+  "settlement_currency": "GBP",
+  "fee_bps": 0,
+  "fixed_fee_minor": 20
+ },
+ {
+  "merchant_id": "m-fjord-travel",
+  "name": "Fjord Travel",
+  "timezone": "Europe/London",
+  "settlement_currency": "GBP",
+  "fee_bps": 200,
+  "fixed_fee_minor": 0
+ },
+ {
+  "merchant_id": "m-gamma-lab",
+  "name": "Gamma Lab",
+  "timezone": "UTC",
+  "settlement_currency": "EUR",
+  "fee_bps": 0,
+  "fixed_fee_minor": 10
+ },
+ {
+  "merchant_id": "m-harbour-fish",
+  "name": "Harbour Fish Co",
+  "timezone": "Australia/Sydney",
+  "settlement_currency": "AUD",
+  "fee_bps": 275,
+  "fixed_fee_minor": 30
+ },
+ {
+  "merchant_id": "m-iris-kuwait",
+  "name": "Iris Home Kuwait",
+  "timezone": "Asia/Kuwait",
+  "settlement_currency": "KWD",
+  "fee_bps": 100,
+  "fixed_fee_minor": 100
+ }
+]

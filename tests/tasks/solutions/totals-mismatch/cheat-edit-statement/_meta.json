@@ -1,0 +1,1 @@
+{"expect_passed": false, "expect_failed": ["reference-data-untouched", "only-allowed-files-changed", "event-identity", "settlement-day", "currency-scaling", "fee-rounding", "mixed-held-out"]}
