@@ -1,0 +1,15 @@
+Usage report 2026-02 (28 days)
+rank  account    name                    plan          units included  overage  top service        charge
+   1  acct-0006  Calder Foods 6          Team           2039      933     1106  egress_gb         $154.45
+   2  acct-0012  Brightwater Freight 12  Team           1401      933      468  storage_gb         $72.43
+   3  acct-0002  Juniper Systems 2       Free           1797       93     1704  build_minutes       $46.34
+   4  acct-0011  Juniper Systems 11      Team           1240      933      307  legacy_sms          $7.09
+   5  acct-0007  Garrow Freight 7        Free            157       93       64  egress_gb           $5.18
+   6  acct-0004  Dunmore Foods 4         Scale          1163    18666        0  legacy_sms          $0.00
+   7  acct-0009  Aldermoor Works 9       Scale           654    18666        0  support_hours        $0.00
+   8  acct-0014  Eastgate Energy 14      Scale          1332    18666        0  storage_gb          $0.00
+   9  acct-0003  Aldermoor Systems 3     Business        146     4666        0  storage_gb          $0.00
+  10  acct-0005  Ironbridge Systems 5    Scale           686    18666        0  egress_gb           $0.00
+  11  acct-0001  Dunmore Health 1        Team            404      933        0  legacy_sms          $0.00
+accounts: 11  rows: 51  skipped: 19
+total charge: $285.49
